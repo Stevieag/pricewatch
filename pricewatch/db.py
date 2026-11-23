@@ -192,6 +192,15 @@ class DB:
         with self.tx() as c:
             c.execute("UPDATE items SET next_check_at=0 WHERE id=?", (item_id,))
 
+    def refresh_all(self) -> int:
+        """Make every active listing (products and alternatives) due now."""
+        with self.tx() as c:
+            return c.execute("UPDATE items SET next_check_at=0 WHERE active=1").rowcount
+
+    def pending_count(self) -> int:
+        row = self.one("SELECT COUNT(*) AS n FROM items WHERE active=1 AND next_check_at<=?", (now(),))
+        return row["n"] if row else 0
+
     def delete_item(self, item_id: int):
         with self.tx() as c:
             c.execute("DELETE FROM items WHERE id=?", (item_id,))

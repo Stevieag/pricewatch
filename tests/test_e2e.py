@@ -185,6 +185,48 @@ class E2E(unittest.TestCase):
         with self.assertRaises(FetchError):
             fetch_price(s, self.shop_url)
 
+    # Refresh all + alert price on the watchlist page
+    def test_10_alert_price_and_refresh_all(self):
+        if not self.db.q("SELECT id FROM items WHERE parent_id IS NULL"):
+            self.db.add_item(url=self.shop_url, title="Acme Kettle AK-200 1.7L", price="49.99",
+                             currency="GBP", interval_minutes=1440)
+        iid = self.db.q("SELECT id FROM items WHERE parent_id IS NULL")[0]["id"]
+        STATE["price"] = "49.99"
+
+        # alert above the current price -> banner + "hit"
+        st, html, _ = self.req(f"/items/{iid}/target", {"target": "50", "csrf": self.csrf()})
+        self.assertEqual(st, 200)
+        self.assertIn("Alert set", html)
+        self.assertIn("at or below your alert", html)
+        self.assertIn("✓ hit", html)
+
+        # alert below the price -> no banner, shows how far to go
+        st, html, _ = self.req(f"/items/{iid}/target", {"target": "30", "csrf": self.csrf()})
+        self.assertNotIn("at or below your alert", html)
+        self.assertIn("to go", html)
+
+        # bad value rejected, empty value removes the alert
+        _, html, _ = self.req(f"/items/{iid}/target", {"target": "abc", "csrf": self.csrf()})
+        self.assertIn("must be a number", html)
+        _, html, _ = self.req(f"/items/{iid}/target", {"target": "", "csrf": self.csrf()})
+        self.assertIn("Alert removed", html)
+        self.assertIsNone(self.db.get_item(iid)["target_price"])
+
+        # alert form needs CSRF like every other form
+        st, _, _ = self.req(f"/items/{iid}/target", {"target": "1"})
+        self.assertEqual(st, 403)
+
+        # Refresh all: everything due now, page shows progress + auto-reload
+        STATE["price"] = "45.00"
+        st, html, _ = self.req("/refresh-all", {"csrf": self.csrf()})
+        self.assertEqual(st, 200)
+        self.assertIn("Refreshing", html)
+        time.sleep(2.5); wait_idle(self.sched)
+        self.assertEqual(self.db.get_item(iid)["current_price"], "45.00")
+        _, html, _ = self.req("/")
+        self.assertIn("Refresh all prices", html)
+        self.assertNotIn('http-equiv="refresh"', html)
+
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, *a, **k):

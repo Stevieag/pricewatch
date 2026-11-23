@@ -99,10 +99,11 @@ class App:
 
 # ======================================================================= HTML
 
-def layout(app: App, title: str, body: str, flash: str = "") -> str:
+def layout(app: App, title: str, body: str, flash: str = "", auto_refresh: int = 0) -> str:
     fl = f'<div class="flash">{e(flash)}</div>' if flash else ""
+    meta_refresh = f'<meta http-equiv="refresh" content="{int(auto_refresh)}">' if auto_refresh else ""
     return f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1">{meta_refresh}
 <title>{e(title)} · PriceWatch</title>
 <link rel="stylesheet" href="/static/app.css"><link rel="manifest" href="/manifest.webmanifest">
 <script src="/static/app.js" defer></script></head><body>
@@ -129,9 +130,30 @@ def freq_inputs(minutes: int = 1440) -> str:
             f'required aria-label="How often"> <select name="unit" aria-label="Unit">{opts}</select></span>')
 
 
+def alert_status(it) -> tuple[str, str]:
+    """(kind, text) for a watchlist row's alert price: kind is hit | near | wait | none."""
+    if not it["target_price"]:
+        return "none", ""
+    target = Decimal(it["target_price"])
+    prices = [Decimal(p) for p in (it["current_price"],) if p]
+    if it["best_alt_price"] is not None:
+        prices.append(Decimal(str(it["best_alt_price"])))
+    if not prices:
+        return "wait", "waiting for a price"
+    best = min(prices)
+    if best <= target:
+        where = "here" if it["current_price"] and Decimal(it["current_price"]) <= target else "at another shop"
+        return "hit", f"✓ hit {where}"
+    gap = best - target
+    pct = gap / best * 100
+    return ("near" if pct <= 5 else "wait"), f"{fmt_price(gap, it['currency'])} to go ({pct:.0f}%)"
+
+
 def page_index(app: App, flash="") -> str:
     rows = []
-    for it in app.db.top_items():
+    hits = []
+    items = app.db.top_items()
+    for it in items:
         cur = it["current_price"]
         change = ""
         if cur and it["first_price"]:
@@ -144,27 +166,49 @@ def page_index(app: App, flash="") -> str:
             b = Decimal(str(it["best_alt_price"]))
             cheaper = cur and b < Decimal(cur)
             best = f'{fmt_price(b, it["currency"])}{" ✓ cheaper" if cheaper else ""}'
-        target = ""
-        if it["target_price"] and cur and Decimal(cur) <= Decimal(it["target_price"]):
-            target = ' <span class="badge good">✓ target hit</span>'
+        kind, alert_text = alert_status(it)
+        if kind == "hit":
+            hits.append(it)
+        alert_cell = f"""<form method="post" action="/items/{it['id']}/target" class="alert-form">{csrf_field(app)}
+<input type="text" name="target" inputmode="decimal" value="{e(it['target_price'] or '')}"
+ placeholder="none" aria-label="Alert price for {e(it['title'] or domain_of(it['url']))}" size="7">
+<button class="small">Set</button></form>{f'<div class="alert-{kind}">{e(alert_text)}</div>' if alert_text else ''}"""
         status = (f'<span class="badge warn" title="{e(it["last_error"])}">⚠ check failed</span>'
                   if it["last_error"] else e(ago(it["last_checked_at"])))
         rows.append(f"""<tr>
 <td><a href="/items/{it['id']}">{e(it['title'] or domain_of(it['url']))}</a>
   <div class="muted">{e(domain_of(it['url']))}{'' if it['active'] else ' · paused'}</div></td>
-<td class="num">{e(fmt_price(cur, it['currency']))}{target}</td><td class="num">{change}</td>
+<td class="num">{e(fmt_price(cur, it['currency']))}</td><td class="num">{change}</td>
 <td class="num">{e(best)}<div class="muted">{it['alt_count']} alt.</div></td>
-<td>{e(human_interval(it['interval_minutes']))}</td><td>{status}</td></tr>""")
+<td class="alert-col">{alert_cell}</td>
+<td>{e(human_interval(it['interval_minutes']))}<div class="muted">{status}</div></td></tr>""")
     table = (f"""<table class="list"><thead><tr><th>Product</th><th class="num">Price</th>
-<th class="num">Change</th><th class="num">Best elsewhere</th><th>Checked</th><th>Last check</th></tr></thead>
+<th class="num">Change</th><th class="num">Best elsewhere</th><th>Alert at or below</th><th>Checks</th></tr></thead>
 <tbody>{''.join(rows)}</tbody></table>""" if rows else
              '<p class="empty">Nothing watched yet. Paste a product link above, or set up sharing.</p>')
-    body = f"""<section class="card"><h1>Watch a price</h1>
+
+    banner = ""
+    if hits:
+        links = "".join(f'<li><a href="/items/{h["id"]}">{e(h["title"] or domain_of(h["url"]))}</a>: '
+                        f'{e(fmt_price(min(Decimal(str(p)) for p in [h["current_price"], h["best_alt_price"]] if p is not None), h["currency"]))}'
+                        f' (alert {e(fmt_price(h["target_price"], h["currency"]))})</li>' for h in hits)
+        banner = (f'<section class="card alert-banner" role="status"><h2>🔔 {len(hits)} '
+                  f'price{"s" if len(hits) != 1 else ""} at or below your alert</h2><ul>{links}</ul></section>')
+
+    pending = app.db.pending_count()
+    refresh = ""
+    if items:
+        refresh = (f'<form method="post" action="/refresh-all" class="row">{csrf_field(app)}'
+                   f'<button{" disabled" if pending else ""}>'
+                   f'{f"Checking {pending} listing(s)…" if pending else "↻ Refresh all prices"}</button>'
+                   + ('<span class="muted">This page updates itself until the checks finish.</span>' if pending else '')
+                   + '</form>')
+    body = f"""{banner}<section class="card"><h1>Watch a price</h1>
 <form method="get" action="/add" class="row">
 <input type="text" name="text" placeholder="Paste a product link (or the whole shared text)" required autofocus>
 <button>Look up price</button></form></section>
-<section><h2>Watchlist</h2>{table}</section>"""
-    return layout(app, "Watchlist", body, flash)
+<section><div class="row spread"><h2>Watchlist</h2>{refresh}</div>{table}</section>"""
+    return layout(app, "Watchlist", body, flash, auto_refresh=10 if pending else 0)
 
 
 def page_add(app: App, raw: str, seen: str = "", flash="") -> str:
@@ -522,6 +566,9 @@ def make_handler(app: App):
 
             if path == "/items":
                 return self.create_item(f)
+            if path == "/refresh-all":
+                n = app.db.refresh_all()
+                return self.redirect("/?" + urlencode({"msg": f"Refreshing {n} listing(s). Shops that need a browser take ~10 s each."}))
             parts = path.strip("/").split("/")
             if len(parts) == 3 and parts[0] == "items" and parts[1].isdigit():
                 return self.item_action(int(parts[1]), parts[2], f)
@@ -567,6 +614,16 @@ def make_handler(app: App):
                 ok = app.agent.available and app.agent.run_in_background(iid)
                 msg = "Searching other shops… refresh in a minute." if ok else app.agent.status_text()
                 return self.redirect(back + "?" + urlencode({"msg": msg}))
+            if action == "target":
+                raw = (f.get("target") or "").strip()
+                tp = parse_price(raw) if raw else None
+                if raw and (tp is None or tp <= 0):
+                    return self.redirect("/?" + urlencode({"msg": "Alert price must be a number, e.g. 49.99"}))
+                app.db.update_item(iid, target_price=str(tp) if tp is not None else None)
+                name = it["title"] or domain_of(it["url"])
+                msg = (f"Alert set: {name} at or below {fmt_price(tp, it['currency'])}." if tp is not None
+                       else f"Alert removed for {name}.")
+                return self.redirect("/?" + urlencode({"msg": msg}))
             if action == "fair":
                 app.fair.run_in_background(iid)
                 return self.redirect(back + "?" + urlencode({"msg": "Checking as anonymous shoppers… refresh in ~30 seconds."}))

@@ -68,6 +68,13 @@ JSON-LD, microdata, Open Graph product tags, then a text heuristic. You'll see t
 price, then choose a frequency (*every N minutes / hours / days / weeks / months /
 years*, from `PW_MIN_INTERVAL_MINUTES` up to 1 year) and an optional target price.
 
+On the watchlist you can:
+- **Refresh all prices**: re-checks every product and alternative now. The page updates itself
+  until the checks finish. At most two invisible browsers run at once for shops that need one.
+- **Set an alert price** on each row (blank removes it). Each row shows *✓ hit*, or how far the
+  best price is from your alert. A banner lists every product at or below its alert, including
+  when another shop is the one that dropped.
+
 > **Be a polite bot.** Hourly or daily is plenty for most products.
 > Some large retailers block automated requests or build prices with JavaScript. Those
 > pages show "No price found" (see Roadmap).

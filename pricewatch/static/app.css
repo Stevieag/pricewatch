@@ -93,3 +93,16 @@ code { background: var(--surface-0); padding: 0 .25rem; border-radius: 3px; }
 .tip .t { color: var(--text-muted); margin-bottom: .2rem; }
 .tip .r { display: flex; justify-content: space-between; gap: .75rem; color: var(--text-primary); font-variant-numeric: tabular-nums; }
 @media (forced-colors: active) { .pw-chart .line { stroke: CanvasText; } }
+
+/* watchlist: refresh + alert price */
+.row.spread { justify-content: space-between; margin-bottom: .5rem; }
+.row.spread h2 { margin: 0; }
+.alert-form { display: flex; gap: .3rem; align-items: center; }
+.alert-form input { width: 6.5em; padding: .3rem .4rem; }
+button.small { padding: .3rem .55rem; font-size: 13px; }
+.alert-hit { color: var(--good); font-weight: 600; font-size: 13px; margin-top: .2rem; }
+.alert-near { color: var(--warn); font-size: 13px; margin-top: .2rem; }
+.alert-wait { color: var(--text-muted); font-size: 13px; margin-top: .2rem; }
+.alert-banner { border-left: 4px solid var(--good); background: var(--good-bg); }
+.alert-banner h2 { color: var(--good); }
+.alert-banner ul { margin: .25rem 0 0; padding-left: 1.2rem; }

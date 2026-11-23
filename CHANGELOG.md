@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Watchlist **Refresh all prices** button: re-checks everything now and auto-updates the
+  page until done. Headless browsers are limited to two at once.
+- **Alert price** on every watchlist row: set or clear it inline, see hit / near / how far to
+  go, and a banner listing products at or below their alert (another shop's price counts too).
+
 ## 0.1.0 (2026-11-23)
 
 First public release.

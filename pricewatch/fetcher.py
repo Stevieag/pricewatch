@@ -154,11 +154,24 @@ def find_browser(configured: str = "") -> str | None:
     return None
 
 
+import threading as _threading
+
+BROWSER_SLOTS = _threading.BoundedSemaphore(2)  # at most 2 headless browsers at once
+
+
 def browser_get(url: str, *, browser: str, user_agent: str, timeout: int = 45,
                 allow_private: bool = False, accept_language: str = "en-GB,en;q=0.9",
                 override_ua: bool = False) -> FetchResult:
     """override_ua: also make Firefox claim `user_agent` (used by Fair Price personas).
     Otherwise Firefox keeps its own genuine User-Agent, which looks less bot-like."""
+    with BROWSER_SLOTS:
+        return _browser_get(url, browser=browser, user_agent=user_agent, timeout=timeout,
+                            allow_private=allow_private, accept_language=accept_language,
+                            override_ua=override_ua)
+
+
+def _browser_get(url: str, *, browser: str, user_agent: str, timeout: int,
+                 allow_private: bool, accept_language: str, override_ua: bool) -> FetchResult:
     if is_firefox(browser):  # Firefox keeps its own genuine User-Agent
         return firefox_get(url, browser=browser, timeout=max(timeout, 60),
                            allow_private=allow_private, accept_language=accept_language,

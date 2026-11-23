@@ -1,0 +1,52 @@
+# Local stack. Every port is published on 127.0.0.1 only.
+#
+#   docker compose up -d                      # v1/v3/v4: PriceWatch only
+#   docker compose --profile search up -d     # + SearXNG for the v2 agent
+#   docker compose --profile ai up -d         # + SearXNG + Ollama (fully local AI)
+#   docker compose exec ollama ollama pull llama3.1
+#
+# Config is read from OUTSIDE the repo (see SECURITY.md). Override with PW_ENV_FILE.
+x-env: &env
+  env_file:
+    - ${PW_ENV_FILE:-${HOME}/.config/pricewatch/pricewatch.env}
+
+services:
+  pricewatch:
+    build: .
+    <<: *env
+    environment:
+      PW_CONTAINER_LOOPBACK_ONLY: "true"      # safe because of the 127.0.0.1 port binding below
+      PW_SEARXNG_URL: http://searxng:8080
+      PW_LLM_BASE_URL: ${PW_LLM_BASE_URL_DOCKER:-http://ollama:11434}
+    ports:
+      - "127.0.0.1:8765:8765"
+    volumes:
+      - pricewatch-data:/data
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    restart: unless-stopped
+
+  searxng:
+    image: searxng/searxng:latest
+    profiles: [search, ai]
+    <<: *env                                   # provides SEARXNG_SECRET
+    volumes:
+      - ./deploy/searxng/settings.yml:/etc/searxng/settings.yml:ro
+    ports:
+      - "127.0.0.1:8888:8080"
+    restart: unless-stopped
+
+  ollama:
+    image: ollama/ollama:latest
+    profiles: [ai]
+    volumes:
+      - ollama-models:/root/.ollama
+    ports:
+      - "127.0.0.1:11434:11434"
+    restart: unless-stopped
+
+volumes:
+  pricewatch-data:
+  ollama-models:

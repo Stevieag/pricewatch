@@ -1,0 +1,28 @@
+{
+  "permissions": {
+    "deny": [
+      "Read(./.env)",
+      "Read(./.env.local)",
+      "Read(./.env.*.local)",
+      "Read(./.env.production)",
+      "Read(./.env.development)",
+      "Read(./**/*.pem)",
+      "Read(./**/*.key)",
+      "Read(./secrets/**)",
+      "Read(./data/**)",
+      "Read(./**/*.db)",
+      "Read(~/.config/pricewatch/**)",
+      "Read(~/.local/share/pricewatch/**)",
+      "Read(~/.ssh/**)",
+      "Read(~/.netrc)",
+      "Edit(./.env)",
+      "Edit(~/.config/pricewatch/**)",
+      "Edit(./.claude/settings.json)",
+      "Bash(env)",
+      "Bash(printenv:*)",
+      "Bash(cat .env:*)",
+      "Bash(cat ~/.config/pricewatch:*)",
+      "Bash(sqlite3:*)"
+    ]
+  }
+}

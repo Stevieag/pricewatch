@@ -1,0 +1,13 @@
+# Files AI assistants must not index or read (used by Gemini/Android Studio; mirrored in
+# .cursorignore and .codeiumignore). The real protection is that secrets live outside
+# the repo — see SECURITY.md.
+.env
+.env.*
+!.env.example
+*.env
+data/
+*.db
+*.sqlite*
+secrets/
+*.pem
+*.key

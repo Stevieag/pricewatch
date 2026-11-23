@@ -1,0 +1,17 @@
+# Minimal SearXNG config for PriceWatch. The secret key comes from the SEARXNG_SECRET
+# environment variable (set in your env file outside the repo), never from this file.
+use_default_settings: true
+
+server:
+  limiter: false          # only reachable from 127.0.0.1 / the compose network
+  image_proxy: false
+  public_instance: false
+
+search:
+  safe_search: 0
+  formats:
+    - html
+    - json                # PriceWatch uses the JSON API
+
+ui:
+  static_use_hash: true

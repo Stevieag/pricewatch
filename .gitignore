@@ -1,0 +1,44 @@
+# --- secrets: never commit ---------------------------------------------------
+.env
+.env.*
+!.env.example
+*.env
+*.pem
+*.key
+*.p12
+*.pfx
+secrets/
+*.secret
+credentials*.json
+.netrc
+
+# --- local data (prices, history, what you shop for) ------------------------
+data/
+*.db
+*.db-wal
+*.db-shm
+*.sqlite*
+
+# --- AI agent local state (may contain transcripts / pasted values) ---------
+.claude/settings.local.json
+.claude/*.local.*
+.aider*
+.cursor/
+
+# --- python ------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+build/
+dist/
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# --- os / editors ------------------------------------------------------------
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

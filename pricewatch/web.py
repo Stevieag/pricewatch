@@ -1,0 +1,627 @@
+"""Local web UI + small JSON API, stdlib only (http.server).
+
+Hardening for a "localhost" app (localhost is NOT automatically safe):
+  * Host-header allowlist      -> blocks DNS-rebinding attacks from web pages
+  * CSRF token on every form   -> other sites can't POST to your local server
+  * Strict CSP, no inline JS   -> injected markup can't run scripts
+  * Optional access token      -> required when bound to anything but loopback
+  * Request logs omit query strings (shared links can carry session tokens)
+"""
+from __future__ import annotations
+
+import hashlib
+import hmac
+import json
+import logging
+import mimetypes
+import secrets
+import time
+from decimal import Decimal
+from html import escape
+from http import HTTPStatus
+from http.cookies import SimpleCookie
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from urllib.parse import parse_qs, urlencode, urlsplit
+
+from . import __version__, chart, fair
+from .agent import PriceAgent
+from .config import Settings
+from .db import DB, now
+from .fetcher import FetchError
+from .monitor import fetch_price
+from .util import (FORM_UNITS, clean_url, domain_of, extract_url, fmt_price, human_interval,
+                   parse_frequency, parse_price)
+
+log = logging.getLogger("pricewatch.web")
+STATIC = Path(__file__).parent / "static"
+SYMBOLS = {"GBP": "£", "USD": "$", "EUR": "€", "JPY": "¥", "INR": "₹"}
+RANGES = {"7d": 7, "30d": 30, "90d": 90, "1y": 365, "all": None}
+MAX_BODY = 64 * 1024
+
+
+def e(v) -> str:
+    return escape("" if v is None else str(v), quote=True)
+
+
+def ago(ts) -> str:
+    if not ts:
+        return "never"
+    d = now() - int(ts)
+    future = d < 0
+    d = abs(d)
+    for size, unit in ((31536000, "y"), (86400, "d"), (3600, "h"), (60, "min")):
+        if d >= size:
+            s = f"{d // size} {unit}"
+            break
+    else:
+        s = "moments" if not future else "<1 min"
+    return f"in {s}" if future else f"{s} ago"
+
+
+class App:
+    def __init__(self, settings: Settings, db: DB, agent: PriceAgent, fair_runner=None):
+        self.s, self.db, self.agent = settings, db, agent
+        self.fair = fair_runner or fair.FairRunner(settings, db)
+        self._csrf_key = secrets.token_bytes(32)  # per-process; never stored
+        self.allowed_hosts = {"127.0.0.1", "localhost", "[::1]", settings.host, *settings.allowed_hosts}
+
+    # ------------------------------------------------------------ security helpers
+    def csrf_token(self) -> str:
+        return hmac.new(self._csrf_key, b"csrf", hashlib.sha256).hexdigest()
+
+    def session_value(self) -> str:
+        return hmac.new(self.s.access_token.reveal().encode(), b"pricewatch-session",
+                        hashlib.sha256).hexdigest()
+
+    def host_ok(self, host_header: str | None) -> bool:
+        if not host_header:
+            return False
+        host = host_header.rsplit(":", 1)[0] if not host_header.endswith("]") else host_header
+        return host.lower() in {h.lower() for h in self.allowed_hosts}
+
+    def bearer_ok(self, auth_header: str | None) -> bool:
+        if not self.s.access_token or not auth_header or not auth_header.startswith("Bearer "):
+            return False
+        return hmac.compare_digest(auth_header[7:].strip(), self.s.access_token.reveal())
+
+    def cookie_ok(self, cookie_header: str | None) -> bool:
+        if not self.s.access_token:
+            return True
+        c = SimpleCookie()
+        try:
+            c.load(cookie_header or "")
+        except Exception:
+            return False
+        v = c.get("pw_auth")
+        return bool(v) and hmac.compare_digest(v.value, self.session_value())
+
+
+# ======================================================================= HTML
+
+def layout(app: App, title: str, body: str, flash: str = "") -> str:
+    fl = f'<div class="flash">{e(flash)}</div>' if flash else ""
+    return f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{e(title)} · PriceWatch</title>
+<link rel="stylesheet" href="/static/app.css"><link rel="manifest" href="/manifest.webmanifest">
+<script src="/static/app.js" defer></script></head><body>
+<header><a class="brand" href="/">PriceWatch</a>
+<nav><a href="/">Watchlist</a><a href="/share">Share setup</a></nav></header>
+<main>{fl}{body}</main>
+<footer>v{__version__} · runs locally · <a href="https://github.com/Stevieag/pricewatch" rel="noopener noreferrer">open source</a></footer>
+</body></html>"""
+
+
+def csrf_field(app: App) -> str:
+    return f'<input type="hidden" name="csrf" value="{app.csrf_token()}">'
+
+
+def freq_inputs(minutes: int = 1440) -> str:
+    qty, unit = minutes, 1
+    for _, size in reversed(FORM_UNITS):
+        if minutes % size == 0:
+            qty, unit = minutes // size, size
+            break
+    opts = "".join(f'<option value="{size}"{" selected" if size == unit else ""}>{name}</option>'
+                   for name, size in FORM_UNITS)
+    return (f'<span class="freq">every <input type="number" name="every" min="1" value="{qty}" '
+            f'required aria-label="How often"> <select name="unit" aria-label="Unit">{opts}</select></span>')
+
+
+def page_index(app: App, flash="") -> str:
+    rows = []
+    for it in app.db.top_items():
+        cur = it["current_price"]
+        change = ""
+        if cur and it["first_price"]:
+            d = Decimal(cur) - Decimal(it["first_price"])
+            if d:
+                cls = "down" if d < 0 else "up"
+                change = f'<span class="{cls}">{"▼" if d < 0 else "▲"} {fmt_price(abs(d), it["currency"])}</span>'
+        best = ""
+        if it["best_alt_price"] is not None:
+            b = Decimal(str(it["best_alt_price"]))
+            cheaper = cur and b < Decimal(cur)
+            best = f'{fmt_price(b, it["currency"])}{" ✓ cheaper" if cheaper else ""}'
+        target = ""
+        if it["target_price"] and cur and Decimal(cur) <= Decimal(it["target_price"]):
+            target = ' <span class="badge good">✓ target hit</span>'
+        status = (f'<span class="badge warn" title="{e(it["last_error"])}">⚠ check failed</span>'
+                  if it["last_error"] else e(ago(it["last_checked_at"])))
+        rows.append(f"""<tr>
+<td><a href="/items/{it['id']}">{e(it['title'] or domain_of(it['url']))}</a>
+  <div class="muted">{e(domain_of(it['url']))}{'' if it['active'] else ' · paused'}</div></td>
+<td class="num">{e(fmt_price(cur, it['currency']))}{target}</td><td class="num">{change}</td>
+<td class="num">{e(best)}<div class="muted">{it['alt_count']} alt.</div></td>
+<td>{e(human_interval(it['interval_minutes']))}</td><td>{status}</td></tr>""")
+    table = (f"""<table class="list"><thead><tr><th>Product</th><th class="num">Price</th>
+<th class="num">Change</th><th class="num">Best elsewhere</th><th>Checked</th><th>Last check</th></tr></thead>
+<tbody>{''.join(rows)}</tbody></table>""" if rows else
+             '<p class="empty">Nothing watched yet. Paste a product link above, or set up sharing.</p>')
+    body = f"""<section class="card"><h1>Watch a price</h1>
+<form method="get" action="/add" class="row">
+<input type="text" name="text" placeholder="Paste a product link (or the whole shared text)" required autofocus>
+<button>Look up price</button></form></section>
+<section><h2>Watchlist</h2>{table}</section>"""
+    return layout(app, "Watchlist", body, flash)
+
+
+def page_add(app: App, raw: str, seen: str = "", flash="") -> str:
+    url = extract_url(raw)
+    if not url:
+        return page_index(app, "No link found in what you shared.")
+    try:
+        url = clean_url(url)
+        ex, final = fetch_price(app.s, url)
+        url = clean_url(final)
+    except (ValueError, FetchError) as err:
+        return page_index(app, f"Couldn't read that page: {err}")
+    found = (f'<p class="big">{e(fmt_price(ex.price, ex.currency))}</p>'
+             f'<p class="muted">found via {e(ex.method)}</p>' if ex.price is not None else
+             '<p class="flash">No price found on this page (it may be rendered with JavaScript). '
+             'You can still watch it; PriceWatch will keep trying.</p>')
+    seen_note = ""
+    sp = parse_price(seen)
+    if sp is not None and ex.price:
+        diff = (sp - ex.price) / ex.price * 100
+        if diff > app.s.fair_threshold_pct:
+            seen_note = (f'<p class="flash bad">You were shown {e(fmt_price(sp, ex.currency))} but an anonymous, '
+                         f'cookie-free visit got {e(fmt_price(ex.price, ex.currency))} ({diff:+.1f}%). '
+                         'This may be personalised pricing.</p>')
+        elif diff < -app.s.fair_threshold_pct:
+            seen_note = f'<p class="muted">You were shown less than the anonymous price ({diff:+.1f}%).</p>'
+        else:
+            seen_note = '<p class="muted">The price you saw matches an anonymous visit.</p>'
+    body = f"""<section class="card"><h1>{e(ex.title or domain_of(url))}</h1>
+<p class="muted">{e(url)}</p>{found}
+<form method="post" action="/items" class="stack">{csrf_field(app)}
+<input type="hidden" name="url" value="{e(url)}">
+<input type="hidden" name="title" value="{e(ex.title or '')}">
+<input type="hidden" name="price" value="{e(ex.price if ex.price is not None else '')}">
+<input type="hidden" name="currency" value="{e(ex.currency or '')}">
+<input type="hidden" name="method" value="{e(ex.method)}">
+<label>Check {freq_inputs()}</label>
+<p class="muted">Anything from {app.s.min_interval_minutes} minutes to 1 year. Please be polite to shops: hourly or daily is usually plenty.</p>
+<label>Alert me at or below (optional) <input type="text" name="target" inputmode="decimal" placeholder="e.g. 199.99"></label>
+<label>Price <i>you</i> were shown (optional, for Fair Price)
+<input type="text" name="seen" inputmode="decimal" value="{e(seen)}" placeholder="captured by the bookmarklet"></label>
+{seen_note}
+<button>Monitor this price</button></form></section>"""
+    return layout(app, "Add", body, flash)
+
+
+def _range_since(rng: str):
+    days = RANGES.get(rng, 30)
+    return 0 if days is None else now() - days * 86400
+
+
+def page_item(app: App, item_id: int, rng: str = "30d", flash="") -> str | None:
+    it = app.db.get_item(item_id)
+    if not it:
+        return None
+    if it["parent_id"]:
+        parent = it["parent_id"]
+        return page_item(app, parent, rng, flash)
+    alts = app.db.alternatives(item_id)
+    since = _range_since(rng)
+    sym = SYMBOLS.get((it["currency"] or "").upper(), "")
+
+    series = [{"name": f"{domain_of(it['url'])} (original)",
+               "points": [(r["checked_at"], float(r["price"])) for r in app.db.history(item_id, since)]}]
+    for a in alts[: chart.MAX_SERIES - 1]:
+        if (a["currency"] or "") == (it["currency"] or ""):
+            series.append({"name": domain_of(a["url"]),
+                           "points": [(r["checked_at"], float(r["price"])) for r in app.db.history(a["id"], since)]})
+    series = [s for s in series if s["points"]]
+    svg, payload = chart.render(series, sym)
+    legend = "".join(f'<li><span class="key s{i + 1}"></span>{e(s["name"])}</li>' for i, s in enumerate(series))
+    range_links = " ".join(
+        f'<a class="pill{" on" if r == rng else ""}" href="/items/{item_id}?range={r}">{r}</a>' for r in RANGES)
+    table_rows = "".join(
+        f"<tr><td>{e(s['name'])}</td><td>{e(time.strftime('%Y-%m-%d %H:%M', time.localtime(t)))}</td>"
+        f"<td class='num'>{e(fmt_price(v, it['currency']))}</td></tr>"
+        for s in series for t, v in reversed(s["points"]))
+    graph = (f"""<div class="chart-wrap" data-chart>{svg}<div class="tip" hidden></div></div>
+<script type="application/json" class="chart-data">{payload}</script>
+{'<ul class="legend">' + legend + '</ul>' if len(series) > 1 else ''}
+<details><summary>Table view</summary><table class="list"><thead><tr><th>Shop</th><th>Checked</th>
+<th class="num">Price</th></tr></thead><tbody>{table_rows}</tbody></table></details>"""
+             if svg else '<p class="empty">No price history in this range yet.</p>')
+
+    alt_rows = "".join(f"""<tr><td><a href="{e(a['url'])}" rel="noopener noreferrer" target="_blank">
+{e(a['title'] or domain_of(a['url']))}</a><div class="muted">{e(domain_of(a['url']))} · added by {e(a['source'])}</div></td>
+<td class="num">{e(fmt_price(a['current_price'], a['currency']))}</td>
+<td>{'<span class="badge warn">⚠</span>' if a['last_error'] else e(ago(a['last_checked_at']))}</td>
+<td><form method="post" action="/items/{a['id']}/delete">{csrf_field(app)}<button class="link">remove</button></form></td></tr>"""
+                       for a in alts)
+    run = app.db.last_run(item_id)
+    running = app.agent.is_running(item_id)
+    run_html = ""
+    if run:
+        run_html = (f'<p class="muted">Last search {e(ago(run["started_at"]))}: {e(run["status"])}</p>'
+                    f'<pre class="log">{e(run["summary"] or "")}</pre>')
+    agent_btn = (f'<form method="post" action="/items/{item_id}/search">{csrf_field(app)}'
+                 f'<button {"disabled" if running or not app.agent.available else ""}>'
+                 f'{"Searching…" if running else "Find better prices"}</button></form>')
+
+    fair_html = render_fair(app, it)
+    err = f'<p class="flash">Last check failed: {e(it["last_error"])}</p>' if it["last_error"] else ""
+    tgt = it["target_price"] or ""
+    body = f"""<section class="card">
+<h1>{e(it['title'] or domain_of(it['url']))}</h1>
+<p><a href="{e(it['url'])}" rel="noopener noreferrer" target="_blank">{e(domain_of(it['url']))} ↗</a>
+· checked every {e(human_interval(it['interval_minutes']))} · last {e(ago(it['last_checked_at']))}
+· next {e(ago(it['next_check_at']))}{'' if it['active'] else ' · <b>paused</b>'}</p>
+<p class="big">{e(fmt_price(it['current_price'], it['currency']))}</p>{err}
+<div class="row">
+<form method="post" action="/items/{item_id}/check">{csrf_field(app)}<button>Check now</button></form>
+<form method="post" action="/items/{item_id}/delete">{csrf_field(app)}<button class="danger">Delete</button></form>
+</div></section>
+
+<section class="card"><h2>Price history</h2><div class="pills">{range_links}</div>{graph}</section>
+
+{fair_html}
+
+<section class="card"><h2>Other shops</h2>
+<p class="muted">{e(app.agent.status_text())}</p>{agent_btn}{run_html}
+{'<table class="list"><tbody>' + alt_rows + '</tbody></table>' if alts else '<p class="empty">No alternatives yet.</p>'}
+<form method="post" action="/items/{item_id}/alternatives" class="row">{csrf_field(app)}
+<input type="text" name="url" placeholder="Add another shop's link yourself" required><button>Add</button></form>
+</section>
+
+<section class="card"><h2>Settings</h2>
+<form method="post" action="/items/{item_id}/update" class="stack">{csrf_field(app)}
+<label>Check {freq_inputs(it['interval_minutes'])}</label>
+<label>Alert at or below <input type="text" name="target" value="{e(tgt)}" inputmode="decimal"></label>
+<label class="inline"><input type="checkbox" name="active" value="1"{' checked' if it['active'] else ''}> Monitoring active</label>
+<button>Save</button></form></section>"""
+    return layout(app, it["title"] or "Item", body, flash)
+
+
+def render_fair(app: App, it) -> str:
+    r = fair.report(app.s, app.db, it["id"])
+    cur = it["currency"]
+    running = app.fair.is_running(it["id"])
+    verdicts = "".join(f'<div class="verdict {v.level}"><b>{e(v.title)}</b><p>{e(v.detail)}</p></div>'
+                       for v in r.verdicts) or '<p class="empty">Not enough data yet.</p>'
+    rows = "".join(f"<tr><td>{e(label)}</td><td class='num'>{e(fmt_price(p, cur)) if p is not None else ''}</td>"
+                   f"<td class='muted'>{e(err or '')}</td></tr>" for label, p, err in r.latest)
+    if r.seen is not None:
+        rows = f"<tr><td><b>You (your browser)</b></td><td class='num'><b>{e(fmt_price(r.seen, cur))}</b></td><td></td></tr>" + rows
+    when = f'<p class="muted">Timing tip: {e(r.cheapest_when)}.</p>' if r.cheapest_when else ""
+    return f"""<section class="card"><h2>Fair price</h2>
+<div class="row stats"><div><span class="muted">Fair price (30-day anonymous median)</span>
+<p class="big">{e(fmt_price(r.fair_price, cur))}</p></div>
+<div><span class="muted">Anonymous baseline now</span><p class="big">{e(fmt_price(r.baseline, cur))}</p></div></div>
+{verdicts}{when}
+{'<table class="list"><thead><tr><th>Shopper profile</th><th class="num">Price</th><th></th></tr></thead><tbody>' + rows + '</tbody></table>' if rows else ''}
+<p class="muted">Last anonymous check: {e(ago(r.last_run))}</p>
+<div class="row">
+<form method="post" action="/items/{it['id']}/fair">{csrf_field(app)}<button {"disabled" if running else ""}>{"Checking…" if running else "Check as anonymous shoppers"}</button></form>
+<form method="post" action="/items/{it['id']}/seen" class="row">{csrf_field(app)}
+<input type="text" name="seen" inputmode="decimal" placeholder="Price you were shown" required><button>Compare</button></form>
+</div></section>"""
+
+
+# Runs in YOUR browser on the shop page: reads the price you are being shown and
+# sends only {url, price} to your local PriceWatch. No cookies leave the page.
+BOOKMARKLET_JS = (
+    "(()=>{let p='';const f=o=>{if(!o||p)return;if(Array.isArray(o))return o.forEach(f);"
+    "if(typeof o!=='object')return;const of=o.offers;if(of){const x=Array.isArray(of)?of[0]:of;"
+    "p=(x&&(x.price||x.lowPrice))||''}if(!p&&o.price)p=o.price;f(o['@graph']);f(o.mainEntity)};"
+    "document.querySelectorAll('script[type=\"application/ld+json\"]').forEach(s=>{try{f(JSON.parse(s.textContent))}catch(e){}});"
+    "if(!p){const m=document.querySelector('meta[property=\"product:price:amount\"],meta[property=\"og:price:amount\"],[itemprop=price]');"
+    "if(m)p=m.content||m.textContent||''}"
+    "location.href='__BASE__/add?text='+encodeURIComponent(location.href)+'&seen='+encodeURIComponent(String(p).trim())})()"
+)
+
+
+def page_share(app: App, base: str) -> str:
+    bm = "javascript:" + BOOKMARKLET_JS.replace("__BASE__", base)
+    body = f"""<section class="card"><h1>Share links into PriceWatch</h1>
+<h2>Desktop: bookmarklet</h2>
+<p>Drag this to your bookmarks bar, then click it on any product page:
+<a class="pill on" href="{e(bm)}">+ PriceWatch</a></p>
+<p class="muted">It also captures the price <i>you</i> are being shown (while signed in), so Fair Price can
+compare it with what anonymous shoppers get. Only the link and that price are sent, and only to this app.</p>
+<h2>Android / desktop Chrome: share sheet</h2>
+<p>Open PriceWatch in Chrome and choose <i>Install app</i>. It then appears in the system share sheet.</p>
+<h2>iPhone: Shortcut</h2>
+<p>See <code>docs/ios-shortcut.md</code>. The phone must reach this computer (LAN or Tailscale), so
+set <code>PW_HOST</code>, <code>PW_ALLOWED_HOSTS</code> and <code>PW_ACCESS_TOKEN</code> first.
+API status: <b>{'enabled' if app.s.access_token else 'disabled (no PW_ACCESS_TOKEN set)'}</b>.</p>
+</section>"""
+    return layout(app, "Share setup", body)
+
+
+def page_login(app: App, flash="") -> str:
+    body = f"""<section class="card"><h1>Sign in</h1><form method="post" action="/login" class="stack">
+{csrf_field(app)}<label>Access token <input type="password" name="token" autocomplete="current-password" required></label>
+<button>Sign in</button></form></section>"""
+    return layout(app, "Sign in", body, flash)
+
+
+MANIFEST = {
+    "name": "PriceWatch", "short_name": "PriceWatch", "start_url": "/", "display": "standalone",
+    "background_color": "#fcfcfb", "theme_color": "#2a78d6",
+    "icons": [{"src": "/static/icon.svg", "sizes": "any", "type": "image/svg+xml"}],
+    "share_target": {"action": "/add", "method": "GET",
+                     "params": {"title": "title", "text": "text", "url": "url"}},
+}
+
+
+# ======================================================================= handler
+
+def make_handler(app: App):
+    class Handler(BaseHTTPRequestHandler):
+        server_version = "PriceWatch"
+        sys_version = ""
+
+        # -- plumbing
+        def log_message(self, fmt, *args):  # never log query strings
+            log.info("%s %s -> %s", self.command, urlsplit(self.path).path, args[1] if len(args) > 1 else "")
+
+        def _headers(self, status, ctype, extra=None, length=None):
+            self.send_response(status)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Security-Policy",
+                             "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; "
+                             "connect-src 'self'; frame-ancestors 'none'; form-action 'self'; base-uri 'none'")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("Referrer-Policy", "no-referrer")
+            self.send_header("X-Frame-Options", "DENY")
+            self.send_header("Cache-Control", "no-store")
+            for k, v in (extra or {}).items():
+                self.send_header(k, v)
+            if length is not None:
+                self.send_header("Content-Length", str(length))
+            self.end_headers()
+
+        def html(self, body: str, status=200, extra=None):
+            b = body.encode()
+            self._headers(status, "text/html; charset=utf-8", extra, len(b))
+            self.wfile.write(b)
+
+        def json(self, obj, status=200):
+            b = json.dumps(obj, default=str).encode()
+            self._headers(status, "application/json", length=len(b))
+            self.wfile.write(b)
+
+        def redirect(self, to: str, extra=None):
+            self._headers(303, "text/plain", {"Location": to, **(extra or {})}, 0)
+
+        def not_found(self):
+            self.html(layout(app, "Not found", "<h1>Not found</h1>"), 404)
+
+        def form(self) -> dict[str, str]:
+            n = int(self.headers.get("Content-Length") or 0)
+            if n > MAX_BODY:
+                raise ValueError("Request too large")
+            raw = self.rfile.read(n).decode("utf-8", errors="replace")
+            if "json" in (self.headers.get("Content-Type") or ""):
+                data = json.loads(raw or "{}")
+                return {k: str(v) for k, v in data.items()} if isinstance(data, dict) else {}
+            return {k: v[0] for k, v in parse_qs(raw, keep_blank_values=True).items()}
+
+        def gate(self, path: str) -> bool:
+            """Host check + auth. Returns False if a response was already sent."""
+            if not app.host_ok(self.headers.get("Host")):
+                self.send_error(HTTPStatus.MISDIRECTED_REQUEST, "Host not allowed")
+                return False
+            if path.startswith("/static/") or path in ("/login", "/manifest.webmanifest", "/healthz"):
+                return True
+            if path.startswith("/api/"):
+                if app.bearer_ok(self.headers.get("Authorization")):
+                    return True
+                if self.command == "GET" and app.cookie_ok(self.headers.get("Cookie")) and app.s.is_loopback_bind():
+                    return True
+                self.json({"error": "unauthorised"}, 401)
+                return False
+            if app.cookie_ok(self.headers.get("Cookie")):
+                return True
+            self.redirect("/login")
+            return False
+
+        def csrf_ok(self, f: dict) -> bool:
+            origin = self.headers.get("Origin")
+            if origin and origin != "null" and not app.host_ok(urlsplit(origin).netloc):
+                return False
+            return hmac.compare_digest(f.get("csrf", ""), app.csrf_token())
+
+        # -- GET
+        def do_GET(self):
+            u = urlsplit(self.path)
+            path, qs = u.path, {k: v[0] for k, v in parse_qs(u.query).items()}
+            if not self.gate(path):
+                return
+            try:
+                if path == "/":
+                    return self.html(page_index(app, qs.get("msg", "")))
+                if path == "/healthz":
+                    return self.json({"ok": True})
+                if path == "/add":
+                    raw = " ".join(qs.get(k, "") for k in ("url", "text", "title"))
+                    return self.html(page_add(app, raw, qs.get("seen", "")))
+                if path == "/share":
+                    base = f"http://{self.headers.get('Host')}"
+                    return self.html(page_share(app, base))
+                if path == "/login":
+                    return self.html(page_login(app))
+                if path.startswith("/items/"):
+                    iid = int(path.split("/")[2])
+                    page = page_item(app, iid, qs.get("range", "30d"), qs.get("msg", ""))
+                    return self.html(page) if page else self.not_found()
+                if path == "/manifest.webmanifest":
+                    b = json.dumps(MANIFEST).encode()
+                    self._headers(200, "application/manifest+json", length=len(b))
+                    return self.wfile.write(b)
+                if path.startswith("/static/"):
+                    return self.static(path[8:])
+                if path == "/api/items":
+                    return self.json([dict(r) for r in app.db.top_items()])
+                if path.startswith("/api/items/") and path.endswith("/history"):
+                    iid = int(path.split("/")[3])
+                    return self.json([dict(r) for r in app.db.history(iid)])
+            except ValueError:
+                pass
+            self.not_found()
+
+        def static(self, name: str):
+            f = (STATIC / name).resolve()
+            if STATIC.resolve() not in f.parents or not f.is_file():
+                return self.not_found()
+            b = f.read_bytes()
+            ctype = mimetypes.guess_type(f.name)[0] or "application/octet-stream"
+            self._headers(200, ctype, {"Cache-Control": "max-age=3600"}, len(b))
+            self.wfile.write(b)
+
+        # -- POST
+        def do_POST(self):
+            path = urlsplit(self.path).path
+            if not self.gate(path):
+                return
+            try:
+                f = self.form()
+            except (ValueError, json.JSONDecodeError):
+                return self.json({"error": "bad request"}, 400)
+
+            if path == "/api/share":  # bearer-authenticated, used by the iOS Shortcut
+                return self.api_share(f)
+
+            if not self.csrf_ok(f):
+                return self.html(layout(app, "Forbidden", "<h1>Form expired</h1><p>Reload and try again.</p>"), 403)
+
+            if path == "/login":
+                tok = f.get("token", "")
+                if app.s.access_token and hmac.compare_digest(tok, app.s.access_token.reveal()):
+                    return self.redirect("/", {"Set-Cookie": f"pw_auth={app.session_value()}; HttpOnly; "
+                                                             f"SameSite=Strict; Path=/; Max-Age=2592000"})
+                time.sleep(1)
+                return self.html(page_login(app, "Wrong token."), 401)
+
+            if path == "/items":
+                return self.create_item(f)
+            parts = path.strip("/").split("/")
+            if len(parts) == 3 and parts[0] == "items" and parts[1].isdigit():
+                return self.item_action(int(parts[1]), parts[2], f)
+            self.not_found()
+
+        def _minutes(self, f) -> int:
+            n = int(f.get("every") or 1)
+            unit = int(f.get("unit") or 1440)
+            if unit not in {size for _, size in FORM_UNITS} or n < 1:
+                raise ValueError("Bad frequency")
+            return parse_frequency(str(n * unit), app.s.min_interval_minutes)
+
+        def create_item(self, f):
+            try:
+                url = clean_url(f.get("url", ""))
+                minutes = self._minutes(f)
+            except ValueError as err:
+                return self.redirect("/?" + urlencode({"msg": str(err)}))
+            iid = app.db.add_item(
+                url=url, title=(f.get("title") or None), price=parse_price(f.get("price")),
+                currency=(f.get("currency") or None), interval_minutes=minutes,
+                target_price=parse_price(f.get("target")), method=f.get("method") or None)
+            if not f.get("price"):
+                app.db.force_due(iid)
+            seen = parse_price(f.get("seen"))
+            if seen is not None:
+                fair.record_seen(app.db, iid, seen, f.get("currency") or None)
+            app.fair.run_in_background(iid)
+            self.redirect(f"/items/{iid}?" + urlencode({"msg": f"Watching. Checks every {human_interval(minutes)}."}))
+
+        def item_action(self, iid: int, action: str, f):
+            it = app.db.get_item(iid)
+            if not it:
+                return self.not_found()
+            back = f"/items/{it['parent_id'] or iid}"
+            if action == "delete":
+                app.db.delete_item(iid)
+                return self.redirect(back if it["parent_id"] else "/?msg=Deleted.")
+            if action == "check":
+                app.db.force_due(iid)
+                return self.redirect(back + "?msg=" + "Check queued - refresh in a few seconds.".replace(" ", "+"))
+            if action == "search":
+                ok = app.agent.available and app.agent.run_in_background(iid)
+                msg = "Searching other shops… refresh in a minute." if ok else app.agent.status_text()
+                return self.redirect(back + "?" + urlencode({"msg": msg}))
+            if action == "fair":
+                app.fair.run_in_background(iid)
+                return self.redirect(back + "?" + urlencode({"msg": "Checking as anonymous shoppers… refresh in ~30 seconds."}))
+            if action == "seen":
+                sp = parse_price(f.get("seen"))
+                if sp is None:
+                    return self.redirect(back + "?msg=Enter+a+price.")
+                fair.record_seen(app.db, iid, sp, it["currency"])
+                return self.redirect(back + "?msg=Saved+the+price+you+saw.")
+            if action == "update":
+                try:
+                    app.db.update_item(iid, interval_minutes=self._minutes(f),
+                                       target_price=str(parse_price(f["target"])) if parse_price(f.get("target")) is not None else None,
+                                       active=1 if f.get("active") else 0)
+                except ValueError as err:
+                    return self.redirect(back + "?" + urlencode({"msg": str(err)}))
+                return self.redirect(back + "?msg=Saved.")
+            if action == "alternatives":
+                try:
+                    url = clean_url(extract_url(f.get("url", "")) or "")
+                except ValueError as err:
+                    return self.redirect(back + "?" + urlencode({"msg": str(err)}))
+                aid = app.db.add_item(url=url, title=None, price=None, currency=it["currency"],
+                                      interval_minutes=it["interval_minutes"], parent_id=iid, source="user")
+                app.db.force_due(aid)
+                return self.redirect(back + "?msg=Added - first check runs shortly.".replace(" ", "+"))
+            self.not_found()
+
+        def api_share(self, f):
+            if not app.bearer_ok(self.headers.get("Authorization")):
+                return self.json({"error": "unauthorised"}, 401)
+            url = extract_url(" ".join([f.get("url", ""), f.get("text", "")]))
+            try:
+                url = clean_url(url or "")
+                minutes = parse_frequency(f.get("frequency") or "1d", app.s.min_interval_minutes)
+                ex, final = fetch_price(app.s, url)
+            except (ValueError, FetchError) as err:
+                return self.json({"error": str(err)}, 422)
+            iid = app.db.add_item(url=clean_url(final), title=ex.title, price=ex.price, currency=ex.currency,
+                                  interval_minutes=minutes, target_price=parse_price(f.get("target")),
+                                  method=ex.method, in_stock=ex.in_stock)
+            seen = parse_price(f.get("seen"))
+            if seen is not None:
+                fair.record_seen(app.db, iid, seen, ex.currency)
+            app.fair.run_in_background(iid)
+            return self.json({"id": iid, "title": ex.title, "price": ex.price, "currency": ex.currency,
+                              "every": human_interval(minutes),
+                              "message": f"Watching {ex.title or 'item'} at {fmt_price(ex.price, ex.currency)}"})
+
+    return Handler
+
+
+def serve(settings: Settings, db: DB, agent: PriceAgent, fair_runner=None) -> ThreadingHTTPServer:
+    app = App(settings, db, agent, fair_runner)
+    httpd = ThreadingHTTPServer((settings.host, settings.port), make_handler(app))
+    httpd.daemon_threads = True
+    httpd.app = app  # type: ignore[attr-defined]
+    return httpd

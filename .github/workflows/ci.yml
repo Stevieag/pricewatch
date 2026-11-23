@@ -9,25 +9,30 @@ permissions:
 
 jobs:
   tests:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
-        python: ["3.9", "3.12"]
+        include:
+          - python: "3.9"          # the Python built into macOS; newest runners no longer ship it
+            os: ubuntu-24.04
+          - python: "3.12"
+            os: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python }}
-      # ubuntu-latest ships Google Chrome, so the browser-fallback tests run too
+      # GitHub's Ubuntu runners ship Google Chrome, so the browser-fallback tests run too
       - run: python -m unittest discover -s tests -v
 
   secret-scan:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0          # scan full history, not just the last commit
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
       - name: Stdlib secret scanner

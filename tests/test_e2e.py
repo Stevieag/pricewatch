@@ -70,7 +70,7 @@ class E2E(unittest.TestCase):
             "PW_PORT": "0", "PW_DATA_DIR": cls.tmp.name, "PW_ALLOW_PRIVATE_HOSTS": "true",
             "PW_SEARCH_PROVIDER": "searxng", "PW_SEARXNG_URL": f"http://127.0.0.1:{sp}",
             "PW_SCHEDULER_TICK_SECONDS": "1", "PW_MIN_INTERVAL_MINUTES": "1",
-            "PW_ACCESS_TOKEN": cls.token, "PW_FAIR_INTERVAL_HOURS": "0",
+            "PW_ACCESS_TOKEN": cls.token, "PW_FAIR_INTERVAL_HOURS": "0",  # gitleaks:allow (test value)
         })
         cls.db = DB(cls.s.db_path)
         cls.agent = PriceAgent(cls.s, cls.db)

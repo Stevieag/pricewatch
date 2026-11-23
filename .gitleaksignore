@@ -1,0 +1,4 @@
+# Known FAKE test values in the first commit (later marked inline with gitleaks:allow).
+# Format: <commit>:<file>:<rule-id>:<line>
+7f7efc2ca27012f9f591b36f8d5da5a68f2dec67:tests/test_core.py:generic-api-key:132
+7f7efc2ca27012f9f591b36f8d5da5a68f2dec67:tests/test_e2e.py:generic-api-key:73

@@ -129,7 +129,8 @@ class TestSecrets(unittest.TestCase):
             pickle.dumps(s)
 
     def test_public_summary_has_no_secret(self):
-        s = load_settings({"PW_ACCESS_TOKEN": "x" * 40, "PW_LLM_API_KEY": "sk-abcdef123456",
+        # deliberately FAKE values: this test proves secrets never render
+        s = load_settings({"PW_ACCESS_TOKEN": "x" * 40, "PW_LLM_API_KEY": "sk-abcdef123456",  # gitleaks:allow
                            "PW_FAIR_PROXIES": "http://u:p@proxy:8080"})
         dumped = str(s.public_summary()) + repr(s)
         for leak in ("x" * 40, "sk-abcdef123456", "u:p@proxy"):

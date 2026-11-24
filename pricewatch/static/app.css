@@ -121,3 +121,11 @@ details.skipped { margin: .75rem 0; }
 form.inline { display: inline; margin-left: .5rem; }
 
 .evidence { font-size: 12px; color: var(--text-muted); margin-top: .15rem; max-width: 34em; }
+
+/* in-app search */
+ul.results { list-style: none; padding: 0; margin: 0; }
+li.result { display: flex; gap: 1rem; justify-content: space-between; align-items: flex-start;
+            padding: .7rem 0; border-bottom: 1px solid var(--border); }
+li.result .result-main { min-width: 0; }
+li.result .snippet { font-size: 13px; color: var(--text-secondary); margin-top: .2rem; }
+li.result .pill { white-space: nowrap; }

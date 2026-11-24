@@ -4,6 +4,8 @@
 
 - Watchlist **Refresh all prices** button: re-checks everything now and auto-updates the
   page until done. Headless browsers are limited to two at once.
+- **In-app search**: type a product name in the watchlist box (or open Search) to find shop
+  pages via SearXNG, with non-shop and list pages hidden, and add any with **Watch this**.
 - Agent filters from a real run: skips social/video/news/review/price-comparison sites and
   search/category pages; only auto-adds prices from the shop's structured data (page-text
   prices go to "Add anyway"); ignores monthly/instalment offers in structured data; trusts a

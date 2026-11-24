@@ -120,7 +120,7 @@ def layout(app: App, title: str, body: str, flash: str = "", auto_refresh: int =
 <link rel="stylesheet" href="/static/app.css"><link rel="manifest" href="/manifest.webmanifest">
 <script src="/static/app.js" defer></script></head><body>
 <header><a class="brand" href="/">PriceWatch</a>
-<nav><a href="/">Watchlist</a><a href="/share">Share setup</a></nav></header>
+<nav><a href="/">Watchlist</a><a href="/search">Search</a><a href="/share">Share setup</a></nav></header>
 <main>{fl}{body}</main>
 <footer>v{__version__} · runs locally · <a href="https://github.com/Stevieag/pricewatch" rel="noopener noreferrer">open source</a></footer>
 </body></html>"""
@@ -225,10 +225,62 @@ def page_index(app: App, flash="") -> str:
                    + '</form>')
     body = f"""{banner}<section class="card"><h1>Watch a price</h1>
 <form method="get" action="/add" class="row">
-<input type="text" name="text" placeholder="Paste a product link (or the whole shared text)" required autofocus>
-<button>Look up price</button></form></section>
+<input type="text" name="text" placeholder="Paste a product link, or type a product to search for" required autofocus
+ aria-label="Product link or search">
+<button>Go</button></form>
+<p class="muted">{'A link looks up its price. Words search the shops via your private SearXNG.' if app.agent.available
+                   else 'Paste a product link. (Searching by name needs SearXNG: run python3 -m pricewatch doctor.)'}</p></section>
 <section><div class="row spread"><h2>Watchlist</h2>{refresh}</div>{table}</section>"""
     return layout(app, "Watchlist", body, flash, auto_refresh=10 if pending else 0)
+
+
+def page_search(app: App, q: str) -> str:
+    """Search shops by product name via SearXNG; each result can be watched in one click."""
+    from .agent import AgentError, searxng_results
+    from .review import looks_like_listing, not_a_shop
+    q = " ".join((q or "").split())[:150]
+    form = f"""<form method="get" action="/search" class="row">
+<input type="text" name="q" value="{e(q)}" placeholder="e.g. Black and Decker 1200W hover mower" required autofocus
+ aria-label="Search for a product"><button>Search</button></form>"""
+    if not q:
+        return layout(app, "Search", f'<section class="card"><h1>Search for a product</h1>{form}</section>')
+    if not app.agent.available:
+        return layout(app, "Search", f"""<section class="card"><h1>Search for a product</h1>{form}
+<p class="flash">Searching needs SearXNG. Run <code>python3 -m pricewatch doctor</code> for the steps,
+or paste a product link on the watchlist instead.</p></section>""")
+    try:
+        results = searxng_results(app.s, q, 40)
+    except AgentError as err:
+        return layout(app, "Search", f'<section class="card"><h1>Search for a product</h1>{form}'
+                                     f'<p class="flash">{e(err)}</p></section>')
+    shown, hidden, per_domain = [], 0, {}
+    for r in results:
+        if not_a_shop(r["url"]) or looks_like_listing(r["url"]):
+            hidden += 1
+            continue
+        d = domain_of(r["url"])
+        if per_domain.get(d, 0) >= 2:  # keep the list varied: at most 2 per shop
+            continue
+        per_domain[d] = per_domain.get(d, 0) + 1
+        shown.append(r)
+        if len(shown) >= 15:
+            break
+    watched = {row["url"] for row in app.db.q("SELECT url FROM items")}
+    rows = "".join(f"""<li class="result"><div class="result-main">
+<a href="{e(r['url'])}" target="_blank" rel="noopener noreferrer"><b>{e(r['title'] or domain_of(r['url']))}</b> ↗</a>
+<div class="muted">{e(domain_of(r['url']))}</div>
+{f'<div class="snippet">{e(r["content"])}</div>' if r['content'] else ''}</div>
+<div>{'<span class="badge good">watching</span>' if r['url'] in watched else
+      f'<a class="pill on" href="/add?{e(urlencode({"text": r["url"]}))}">Watch this</a>'}</div></li>"""
+                   for r in shown)
+    note = (f'<p class="muted">Hid {hidden} result(s) that aren\'t shop product pages '
+            '(social, news, reviews, price-comparison, search or category pages).</p>' if hidden else "")
+    body = f"""<section class="card"><h1>Search for a product</h1>{form}</section>
+<section class="card"><h2>{len(shown)} shop page(s) for “{e(q)}”</h2>{note}
+{f'<ul class="results">{rows}</ul>' if shown else '<p class="empty">No shop pages found. Try fewer or different words, e.g. the model number.</p>'}
+<p class="muted">“Watch this” reads the page's price and asks how often to check it. Prices aren't
+fetched here, to keep searching quick.</p></section>"""
+    return layout(app, f"Search: {q}", body)
 
 
 def page_add(app: App, raw: str, seen: str = "", flash="") -> str:
@@ -587,7 +639,11 @@ def make_handler(app: App):
                     return self.json({"ok": True})
                 if path == "/add":
                     raw = " ".join(qs.get(k, "") for k in ("url", "text", "title"))
+                    if not extract_url(raw) and raw.strip():  # words, not a link: search for it
+                        return self.redirect("/search?" + urlencode({"q": raw.strip()[:150]}))
                     return self.html(page_add(app, raw, qs.get("seen", "")))
+                if path == "/search":
+                    return self.html(page_search(app, qs.get("q", "")))
                 if path == "/share":
                     base = f"http://{self.headers.get('Host')}"
                     return self.html(page_share(app, base))

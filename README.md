@@ -68,6 +68,11 @@ JSON-LD, microdata, Open Graph product tags, then a text heuristic. You'll see t
 price, then choose a frequency (*every N minutes / hours / days / weeks / months /
 years*, from `PW_MIN_INTERVAL_MINUTES` up to 1 year) and an optional target price.
 
+**Search from inside PriceWatch.** Type a product name instead of a link (or use **Search** in the
+menu). PriceWatch searches through your private SearXNG and hides results that aren't shop product
+pages, such as social, news, reviews, price-comparison, search and category pages. It shows at most two per
+shop. **Watch this** reads that page's price and asks how often to check it.
+
 On the watchlist you can:
 - **Refresh all prices**: re-checks every product and alternative now. The page updates itself
   until the checks finish. At most two invisible browsers run at once for shops that need one.

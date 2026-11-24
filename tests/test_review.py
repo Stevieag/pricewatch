@@ -150,5 +150,50 @@ class AgentOnRealProblems(unittest.TestCase):
         self.assertEqual(self.db.get_item(alt)["review"], "confirmed")
 
 
+class InAppSearch(AgentOnRealProblems):
+    """The watchlist box: words search via SearXNG, links look up the price."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        from pricewatch.web import serve
+        cls.httpd = serve(cls.s, cls.db, PriceAgent(cls.s, cls.db))
+        threading.Thread(target=cls.httpd.serve_forever, daemon=True).start()
+        cls.base = f"http://127.0.0.1:{cls.httpd.server_address[1]}"
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.httpd.shutdown()
+        super().tearDownClass()
+
+    # the inherited agent tests run once in the parent class only
+    test_filters_and_model_number_override = None
+    test_recheck_flags_o2_style_price = None
+
+    def get(self, path):
+        import urllib.request
+        with urllib.request.urlopen(self.base + path, timeout=20) as r:
+            return r.geturl(), r.read().decode()
+
+    def test_words_search_and_filter(self):
+        url, html = self.get("/add?text=black+decker+hover+mower")
+        self.assertIn("/search?q=black+decker+hover+mower", url)          # redirected to search
+        self.assertIn("/mower-bemwh551gb", html)                            # the shop product page
+        self.assertNotIn("facebook.com", html.split("Hid")[0])              # non-shop hidden
+        self.assertNotIn("/browse/mowers", html)                            # list page hidden
+        self.assertIn("Hid 2 result(s)", html)
+        self.assertIn('href="/add?text=http', html)                         # Watch this -> price lookup
+
+    def test_link_still_looks_up_price(self):
+        url, html = self.get(f"/add?text=http://localhost:{self.p}/mower-bemwh551gb")
+        self.assertIn("/add?", url)
+        self.assertIn("£49.99", html)
+        self.assertIn("Monitor this price", html)
+
+    def test_search_page_escapes_query(self):
+        _, html = self.get("/search?q=%3Cscript%3Ealert(1)%3C/script%3E")
+        self.assertNotIn("<script>alert(1)", html)
+
+
 if __name__ == "__main__":
     unittest.main()

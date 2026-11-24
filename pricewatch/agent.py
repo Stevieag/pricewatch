@@ -172,6 +172,11 @@ def _safe_title(t: str | None) -> str:
 # ---------------------------------------------------------------- search
 
 def searxng_search(s: Settings, query: str, limit: int) -> list[str]:
+    return [r["url"] for r in searxng_results(s, query, limit * 2)]
+
+
+def searxng_results(s: Settings, query: str, limit: int) -> list[dict]:
+    """[{url, title, content}] from the local SearXNG, best-ranked first, unique URLs."""
     qs = urllib.parse.urlencode({"q": query, "format": "json", "categories": "shopping,general"})
     req = urllib.request.Request(f"{s.searxng_url}/search?{qs}",
                                  headers={"User-Agent": s.user_agent, "Accept": "application/json"})
@@ -180,14 +185,16 @@ def searxng_search(s: Settings, query: str, limit: int) -> list[str]:
             data = json.loads(r.read().decode())
     except (urllib.error.URLError, OSError, json.JSONDecodeError) as e:
         raise AgentError(f"Search failed: {getattr(e, 'reason', e)}") from None
-    urls = []
+    out, seen = [], set()
     for res in data.get("results", []):
         u = res.get("url")
-        if u and u.startswith(("http://", "https://")) and u not in urls:
-            urls.append(u)
-        if len(urls) >= limit * 2:
+        if u and u.startswith(("http://", "https://")) and u not in seen:
+            seen.add(u)
+            out.append({"url": u, "title": str(res.get("title") or "")[:200],
+                        "content": str(res.get("content") or "")[:300]})
+        if len(out) >= limit:
             break
-    return urls
+    return out
 
 
 # ---------------------------------------------------------------- matching

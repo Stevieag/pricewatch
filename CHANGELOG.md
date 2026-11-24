@@ -4,6 +4,18 @@
 
 - Watchlist **Refresh all prices** button: re-checks everything now and auto-updates the
   page until done. Headless browsers are limited to two at once.
+- Agent filters from a real run: skips social/video/news/review/price-comparison sites and
+  search/category pages; only auto-adds prices from the shop's structured data (page-text
+  prices go to "Add anyway"); ignores monthly/instalment offers in structured data; trusts a
+  shared manufacturer model number over the AI; strips the shop's own name from searches.
+- Scheduled re-checks re-judge other shops' prices (page text, under 60% or over 2x the
+  product's price) and flag them; only you can clear a flag.
+- Fair Price shows **evidence** for each profile's price (shop data vs page text, with the
+  surrounding words) and a link to the page. Device-pricing warnings now need both prices from
+  the shop's structured data; otherwise the verdict is "possible lower price, unconfirmed".
+- Page reading skips used / other-seller / refurbished / renewed offers (Amazon-style pages).
+- `pricewatch check URL --as android|iphone|windows|mac|linux` shows the price a device
+  profile gets, how it was found, and the words around it.
 - **Feedback for the AI**: mark each found shop *correct*, *wrong price* (with the corrected
   link) or *not the same product*, and leave notes. Notes become per-shop advice in the AI's
   prompt. Corrected links that add options (e.g. `?paymentTab=pay-in-full`) are learned per shop,

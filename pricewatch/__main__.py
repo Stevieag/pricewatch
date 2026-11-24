@@ -23,6 +23,8 @@ def main(argv=None) -> int:
     sub.add_parser("config", help="show effective config (secrets are never printed)")
     c = sub.add_parser("check", help="fetch one URL and print the extracted price")
     c.add_argument("url")
+    c.add_argument("--as", dest="persona", metavar="DEVICE",
+                   help="visit as a Fair Price profile: android, iphone, windows, mac, linux")
     ca = sub.add_parser("check-all", help="re-check every product in your database now")
     ca.add_argument("--no-fair", action="store_true", help="skip the Fair Price check (faster)")
     sub.add_parser("doctor", help="check the AI search setup (Ollama, SearXNG, browser)")
@@ -44,13 +46,25 @@ def main(argv=None) -> int:
         return 0
     if args.cmd == "check":
         from .fetcher import FetchError
+        if args.persona:
+            from . import fair
+            pick = {"android": "android-chrome", "iphone": "iphone-safari", "windows": "desktop-win-en",
+                    "mac": "mac-safari-en", "linux": "linux-firefox-de"}.get(args.persona.lower())
+            persona = next((p for p in fair.PERSONAS if p["id"] == pick), None)
+            if not persona:
+                print("--as must be one of: android, iphone, windows, mac, linux", file=sys.stderr)
+                return 2
+            s.user_agent = persona["ua"]
+            s.browser_fetch = "never"  # a real browser can't honestly pretend to be another device
+            print(f"Visiting as: {persona['label']} (plain request, no cookies)", file=sys.stderr)
         try:
             ex, final = fetch_price(s, args.url)
         except FetchError as e:
             print(f"Couldn't read that page: {e}", file=sys.stderr)
             return 1
         print(json.dumps({"url": final, "title": ex.title, "price": str(ex.price) if ex.price is not None else None,
-                          "currency": ex.currency, "method": ex.method, "in_stock": ex.in_stock}, indent=2))
+                          "currency": ex.currency, "method": ex.method, "reliable": ex.reliable,
+                          "found_in": ex.context, "in_stock": ex.in_stock}, indent=2, ensure_ascii=False))
         return 0
 
     if args.cmd == "check-all":

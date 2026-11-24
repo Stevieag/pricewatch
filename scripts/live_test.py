@@ -113,8 +113,9 @@ def main() -> int:
         t = time.time()
         n = fair.run_personas(s, db, item["id"])
         rep = fair.report(s, db, item["id"])
-        for label, price, err in rep.latest:
-            print(f"        {label:<28} {price if price is not None else '-':>10}  {err or ''}")
+        for label, price, err, method, ctx in rep.latest:
+            how = f"via {method}" if price is not None else (err or "")
+            print(f"        {label:<28} {price if price is not None else '-':>10}  {how}")
         step("Anonymous baseline price found", rep.baseline is not None,
              f"{n} profile(s) priced in {time.time() - t:.0f}s, baseline {rep.baseline}")
         for v in rep.verdicts:

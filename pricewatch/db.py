@@ -99,6 +99,8 @@ CREATE TABLE IF NOT EXISTS rejected (
 MIGRATIONS = [
     ("items", "review", "TEXT NOT NULL DEFAULT 'ok'"),   # ok | suspect | wrong | confirmed
     ("items", "review_note", "TEXT"),
+    ("fair_checks", "method", "TEXT"),     # how the price was read (jsonld, price-element, ...)
+    ("fair_checks", "context", "TEXT"),    # words around the price, as evidence
 ]
 COUNTS_AS_PRICE = ("ok", "confirmed")  # review states whose price is trusted
 

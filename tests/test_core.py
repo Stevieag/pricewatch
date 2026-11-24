@@ -151,6 +151,60 @@ class TestSecrets(unittest.TestCase):
                                                  "PW_HOST": "127.0.0.1"})
 
 
+class TestOtherOffersIgnored(unittest.TestCase):
+    """Amazon-style pages carry used / other-seller prices next to the real one."""
+
+    def test_used_and_other_seller_prices_are_skipped(self):
+        pages = [
+            '<div class="olp-link">New &amp; Used (12) from <span class="a-price">£41.29</span></div>'
+            '<div id="corePrice"><span class="a-price">£69.99</span></div>',
+            '<div class="a-section aod-offer"><span class="a-price">£41.29</span></div>'
+            '<span class="a-price priceToPay">£69.99</span>',
+            '<p>Used from £41.29 · Buy new £69.99</p>',
+        ]
+        for html in pages:
+            ex = extract(html)
+            self.assertEqual(ex.price, Decimal("69.99"), html)
+            self.assertFalse(ex.reliable)
+            self.assertTrue(ex.context)
+
+    def test_unrelated_class_words_are_not_mistaken(self):
+        ex = extract('<div class="focused-card"><span class="price">£12.00</span></div>')
+        self.assertEqual(ex.price, Decimal("12.00"))
+
+
+class TestFairVerdictReliability(unittest.TestCase):
+    def _report(self, rows):
+        import tempfile
+        from pricewatch import fair
+        from pricewatch.db import DB, now
+        d = tempfile.mkdtemp()
+        s = load_settings({"PW_DATA_DIR": d})
+        db = DB(s.db_path)
+        iid = db.add_item(url="https://shop.example/p", title="Game", price="69.99", currency="GBP",
+                          interval_minutes=1440)
+        with db.tx() as c:
+            for persona, price, method, ctx in rows:
+                c.execute("INSERT INTO fair_checks(item_id,persona,price,currency,checked_at,method,context) "
+                          "VALUES(?,?,?,?,?,?,?)", (iid, persona, price, "GBP", now(), method, ctx))
+        return fair.report(s, db, iid)
+
+    def test_page_text_difference_is_unconfirmed(self):
+        rep = self._report([("desktop-win-en", "69.99", "price-element", "Buy new £69.99"),
+                            ("android-chrome", "41.29", "price-element", "Other offers £41.29")])
+        titles = [v.title for v in rep.verdicts]
+        self.assertFalse(any("Price changes by device" in t for t in titles))
+        info = [v for v in rep.verdicts if "unconfirmed" in v.title][0]
+        self.assertIn("£41.29", info.title)
+        self.assertIn("Other offers £41.29", info.detail)
+        self.assertEqual(len(rep.latest[0]), 5)  # label, price, error, method, context
+
+    def test_structured_data_difference_is_device_pricing(self):
+        rep = self._report([("desktop-win-en", "69.99", "jsonld", None),
+                            ("iphone-safari", "74.99", "jsonld+browser", None)])
+        self.assertTrue(any(v.title == "Price changes by device or profile" for v in rep.verdicts))
+
+
 class TestSearchQueries(unittest.TestCase):
     def test_clean_titles(self):
         from pricewatch.agent import clean_title_for_search as c

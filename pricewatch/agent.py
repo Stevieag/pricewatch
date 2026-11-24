@@ -37,13 +37,13 @@ from .config import Settings
 from .db import DB
 from .fetcher import FetchError
 from .monitor import fetch_price
+from .review import looks_like_listing, model_codes, not_a_shop, price_doubt, shares_model_code
 from .util import clean_url, domain_of, url_for_ai
 
 log = logging.getLogger("pricewatch.agent")
 
 MAX_TITLE_FOR_AI = 160
 MAX_ADVICE_FOR_AI = 600
-SUSPICIOUS_RATIO = Decimal("0.6")  # a new shop under 60% of the known price gets flagged for checking
 
 
 class AgentError(Exception):
@@ -137,6 +137,9 @@ def _is_shop_segment(seg: str, domain: str | None) -> bool:
         return True                           # "Buy online at Currys", "Free delivery"
     squashed = re.sub(r"[^a-z0-9]", "", low)
     host = re.sub(r"[^a-z0-9]", "", (domain or "").lower())
+    label = re.sub(r"[^a-z0-9]", "", (domain or "").lower().split(".")[0])
+    if label and len(label) >= 3 and squashed.startswith(label):
+        return True                           # "Amazon.co.uk: PC" on amazon.co.uk
     return bool(squashed) and len(squashed) >= 3 and squashed in host   # "Argos" on argos.co.uk
 
 
@@ -152,6 +155,8 @@ def clean_title_for_search(title: str | None, domain: str | None = None) -> str:
     words, seen = [], set()
     for w in re.split(r"[\s&+/,()|]+", " ".join(segments)):
         key = w.lower().strip(".:;!-–—")
+        if re.search(r"\.(?:co\.uk|com|net|org|co|uk|de|fr)$", key):
+            continue                          # "Amazon.co.uk" inside a title
         if not key or key in seen or key in _SEARCH_NOISE:
             continue                          # drops repeated brand names and filler words
         seen.add(key)
@@ -218,6 +223,7 @@ class Candidate:
 class PriceAgent:
     def __init__(self, s: Settings, db: DB):
         self.s, self.db, self.llm = s, db, LLM(s)
+        self.known_codes: set[str] = set()
         self._running: set[int] = set()
         self._lock = threading.Lock()
 
@@ -263,10 +269,10 @@ class PriceAgent:
         """Returns (same_product, doubt). `doubt` is a reason to flag the price for the user's
         check (e.g. it looks like a monthly or deposit price) or None if it looks fine.
         The user's own feedback about this shop is passed to the model as advice."""
-        doubt = None
-        if orig_price and cand.price < orig_price * SUSPICIOUS_RATIO:
-            doubt = (f"much lower than {orig_price} elsewhere - could be a monthly, deposit, "
-                     "trade-in or used price")
+        doubt = price_doubt(cand.price, orig_price, cand.method)
+        code = shares_model_code(self.known_codes, model_codes(cand.title)) if self.known_codes else None
+        if code:  # same manufacturer model number: same product, whatever a small model thinks
+            return True, doubt
         if self.llm.enabled:
             advice = self.db.advice_for(domain_of(cand.url))
             advice_txt = ""
@@ -328,6 +334,11 @@ class PriceAgent:
         known = {domain_of(item["url"])} | {domain_of(a["url"]) for a in self.db.alternatives(item_id)}
         rejected = self.db.rejected_urls(item_id)
         rejected_paths = {urlsplit(u).netloc + urlsplit(u).path for u in rejected}
+        # model numbers we trust: the product's own title + shops you added or confirmed
+        self.known_codes = model_codes(title)
+        for a in self.db.alternatives(item_id):
+            if a["review"] == "confirmed" or a["source"] in ("user", "you"):
+                self.known_codes |= model_codes(a["title"])
 
         checked = added = 0
         notes = []
@@ -340,6 +351,13 @@ class PriceAgent:
                 continue
             if domain_of(url) in known:
                 continue
+            why_not = not_a_shop(url)
+            if why_not:
+                notes.append(f"{domain_of(url)}: skipped - {why_not}")
+                continue
+            if looks_like_listing(url):
+                notes.append(f"{domain_of(url)}: skipped - a search/category page, not one product")
+                continue
             if url in rejected or (urlsplit(url).netloc + urlsplit(url).path) in rejected_paths:
                 notes.append(f"{domain_of(url)}: skipped - you said it's not the same product")
                 continue
@@ -350,8 +368,18 @@ class PriceAgent:
             except FetchError as e:
                 notes.append(f"{domain_of(url)}: {e}")
                 continue
+            if ex.listing:
+                notes.append(f"{domain_of(url)}: skipped - a list of products, not one product page")
+                continue
             if ex.price is None or not ex.title:
                 notes.append(f"{domain_of(url)}: no price found")
+                continue
+            if not ex.reliable:  # page text only: never auto-add, but offer it
+                self.db.record_skipped(item_id, self.apply_shop_rules(clean_url(final)), ex.title,
+                                       ex.price, ex.currency or item["currency"],
+                                       "price read from the page text, not the shop's product data")
+                notes.append(f"{domain_of(url)}: not added - price ({ex.price}) only found in page "
+                             "text; you can still add it")
                 continue
             final = self.apply_shop_rules(clean_url(final))
             if item["currency"] and ex.currency and ex.currency != item["currency"]:
@@ -361,6 +389,7 @@ class PriceAgent:
                 continue
             cand = Candidate(final, ex.title, ex.price, ex.currency or item["currency"], ex.method)
             same, doubt = self.judge(title, cand, orig_price)
+            code = shares_model_code(self.known_codes, model_codes(cand.title)) if self.known_codes else None
             if not same:
                 self.db.record_skipped(item_id, cand.url, cand.title, cand.price, cand.currency,
                                        "the AI judged it not the same product")
@@ -376,7 +405,8 @@ class PriceAgent:
                 notes.append(f"{domain_of(url)}: ADDED at {cand.price} - CHECK THIS PRICE: {doubt} {cand.url}")
             else:
                 cheaper = orig_price is not None and cand.price < orig_price
-                notes.append(f"{domain_of(url)}: ADDED at {cand.price}{' (cheaper!)' if cheaper else ''} {cand.url}")
+                why = f" (same model {code})" if code else ""
+                notes.append(f"{domain_of(url)}: ADDED at {cand.price}{' (cheaper!)' if cheaper else ''}{why} {cand.url}")
 
         return f'Query "{query}" · checked {checked} shops · added {added}.\n' + "\n".join(notes)
 

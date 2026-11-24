@@ -69,6 +69,23 @@ def check_item(settings: Settings, db: DB, item) -> None:
     db.record_check(item["id"], price=ex.price, currency=ex.currency, title=ex.title,
                     method=ex.method, in_stock=ex.in_stock)
     log.info("check %s: %s %s", item["id"], ex.price, ex.currency or "")
+    _review_alternative(db, item, ex)
+
+
+def _review_alternative(db: DB, item, ex) -> None:
+    """After each check of another shop's listing, re-judge whether its price can be trusted
+    (e.g. O2 still reporting £20 after the link was corrected). Only you can clear a flag:
+    'confirmed' and 'wrong' are left alone."""
+    if not item["parent_id"]:
+        return
+    current = db.get_item(item["id"])
+    if not current or (current["review"] or "ok") in ("confirmed", "wrong"):
+        return
+    from .review import price_doubt
+    parent = db.get_item(item["parent_id"])
+    doubt = price_doubt(ex.price, parent["current_price"] if parent else None, ex.method)
+    if doubt and current["review"] != "suspect":
+        db.set_review(item["id"], "suspect", doubt)
 
 
 class Scheduler(threading.Thread):

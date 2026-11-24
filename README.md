@@ -111,6 +111,16 @@ count as cheaper, or trigger alerts, until you confirm them. Under each shop on 
 - **✕ Not the same product**: removed, and the agent never re-adds that link.
 - **A note** ("£20 is monthly…") is passed to the AI as advice whenever it judges that shop again.
 
+The agent only adds a shop automatically when:
+- it's a shop, not a social, video, news, review or price-comparison site;
+- it's one product's page, not a search or category list;
+- the price comes from the shop's own product data, not the page text.
+
+Monthly, instalment and deposit offers are ignored when a page also lists the pay-in-full
+price. A shared manufacturer model number (e.g. BEMWH551) counts as the same product even if
+the AI says otherwise. Every scheduled re-check of another shop re-judges its price, so a
+listing that starts reporting a monthly or page-text price gets flagged again.
+
 Shops the agent checked but didn't add are listed with their price and the reason, with
 **Add anyway** for when you know better. Product titles are cleaned before searching
 (repeated brand names, prices and shop names removed), and two searches are run and combined.
@@ -146,6 +156,14 @@ spots a browser claiming to be something it isn't. PriceWatch then uses honest a
 in your installed browser's real identity (fresh profile, English and German), spaced out. That
 still answers the key question, *is the price I see higher than an anonymous visitor's?*, and
 the profile rows show "skipped" with the reason.
+
+Every profile row shows **where its price was found**: *shop data* (the shop's own structured
+product data, reliable) or *page text*, with the words around it. "Price changes by device"
+is only reported when both prices come from shop data. A difference read from page text is shown
+as **"Possible lower price, unconfirmed"**, because on pages like Amazon's it is often a used
+copy, another seller or another edition. Used, other-seller, refurbished and renewed prices are
+skipped when reading pages. To see what one device gets, and why, run
+`python3 -m pricewatch check "<link>" --as android` (or `iphone`, `windows`, `mac`, `linux`).
 
 The **Fair price** figure is the 30-day median of anonymous prices. Persona checks run
 when you add an item, every `PW_FAIR_INTERVAL_HOURS`, and on demand.

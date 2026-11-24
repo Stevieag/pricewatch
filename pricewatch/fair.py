@@ -41,6 +41,7 @@ from .config import Settings
 from .db import DB, now
 from .extract import extract
 from .fetcher import FetchError, browser_get, find_browser, safe_get
+from .extract import RELIABLE_METHODS
 from .util import fmt_price
 
 # Anonymous shopper profiles. Deliberately boring, common configurations.
@@ -80,7 +81,7 @@ def run_personas(s: Settings, db: DB, item_id: int) -> int:
     rows = []
     blocked = 0
     for p in profiles:
-        price = cur = err = None
+        price = cur = err = method = ctx = None
         try:
             if "proxy_index" in p:
                 text = _fetch_via_proxy(s, item["url"], p)
@@ -90,12 +91,12 @@ def run_personas(s: Settings, db: DB, item_id: int) -> int:
                 text = safe_get(item["url"], user_agent=p["ua"], timeout=s.fetch_timeout,
                                 allow_private=s.allow_private_hosts, accept_language=p["lang"]).text
             ex = extract(text)
-            price, cur = ex.price, ex.currency
+            price, cur, method, ctx = ex.price, ex.currency, ex.method, ex.context
             err = None if price is not None else "no price found"
         except FetchError as e:
             err = str(e)
             blocked += "proxy_index" not in p
-        rows.append([item_id, p["id"], str(price) if price is not None else None, cur, err, t])
+        rows.append([item_id, p["id"], str(price) if price is not None else None, cur, err, t, method, ctx])
         time.sleep(0.5)  # be gentle with the shop
 
     # Shop blocks plain requests? Device imitation is then impossible: bot protection spots a
@@ -109,19 +110,20 @@ def run_personas(s: Settings, db: DB, item_id: int) -> int:
         for i, lang in enumerate(BROWSER_LANGS):
             if i:
                 time.sleep(BROWSER_SPACING_SECONDS)
-            price = cur = err = None
+            price = cur = err = method = ctx = None
             try:
                 ex = extract(browser_get(item["url"], browser=browser, user_agent=s.user_agent,
                                          allow_private=s.allow_private_hosts, accept_language=lang[1]).text)
-                price, cur = ex.price, ex.currency
+                price, cur, method, ctx = ex.price, ex.currency, ex.method + "+browser", ex.context
                 err = None if price is not None else "no price found"
             except FetchError as e:
                 err = str(e)
-            rows.append([item_id, f"browser:{lang[0]}", str(price) if price is not None else None, cur, err, t])
-    rows = [tuple(r[:4]) + ((r[4][:200] if r[4] else None), r[5]) for r in rows]
+            rows.append([item_id, f"browser:{lang[0]}", str(price) if price is not None else None, cur, err, t, method, ctx])
+    rows = [tuple(r[:4]) + ((r[4][:200] if r[4] else None), r[5], r[6], (r[7] or "")[:160] or None)
+            for r in rows]
     with db.tx() as c:
-        c.executemany("INSERT INTO fair_checks(item_id,persona,price,currency,error,checked_at) "
-                      "VALUES(?,?,?,?,?,?)", rows)
+        c.executemany("INSERT INTO fair_checks(item_id,persona,price,currency,error,checked_at,method,context) "
+                      "VALUES(?,?,?,?,?,?,?,?)", rows)
     return sum(1 for r in rows if r[2] is not None)
 
 
@@ -166,7 +168,7 @@ class Verdict:
 class FairReport:
     baseline: Decimal | None           # median anonymous price, latest round
     fair_price: Decimal | None         # median of anonymous prices over 30 days
-    latest: list[tuple[str, Decimal | None, str | None]]  # (label, price, error)
+    latest: list[tuple]  # (label, price, error, method, context) per shopper profile
     seen: Decimal | None
     verdicts: list[Verdict]
     cheapest_when: str | None
@@ -217,14 +219,27 @@ def report(s: Settings, db: DB, item_id: int) -> FairReport:
                          "Use the bookmarklet on this product while signed in, so PriceWatch can compare "
                          "your price with anonymous shoppers."))
 
-    # 2. spread between anonymous profiles
+    # 2. spread between anonymous profiles. Only call it device pricing when BOTH prices came
+    #    from the shop's structured data; a price read from page text may be a used copy,
+    #    another seller or another edition (e.g. Amazon's "Used from £41.29").
     if len(latest_prices) >= 2:
         lo, hi = min(latest_prices), max(latest_prices)
         if lo and (hi - lo) / lo * 100 > pct:
-            by = sorted(((persona_label(r["persona"]), Decimal(r["price"])) for r in latest_rows if same_cur(r)),
-                        key=lambda x: x[1])
-            v.append(Verdict("warn", "Price changes by device or profile",
-                             f"Cheapest as {by[0][0]} ({m(by[0][1])}), dearest as {by[-1][0]} ({m(by[-1][1])})."))
+            by = sorted((r for r in latest_rows if same_cur(r)), key=lambda r: Decimal(r["price"]))
+            cheap, dear = by[0], by[-1]
+            rel = lambda r: (r["method"] or "").split("+")[0] in RELIABLE_METHODS  # noqa: E731
+            if rel(cheap) and rel(dear):
+                v.append(Verdict("warn", "Price changes by device or profile",
+                                 f"Cheapest as {persona_label(cheap['persona'])} ({m(Decimal(cheap['price']))}), "
+                                 f"dearest as {persona_label(dear['persona'])} ({m(Decimal(dear['price']))}), "
+                                 "both from the shop's own product data."))
+            else:
+                ev = f' Found in: "{cheap["context"]}".' if cheap["context"] else ""
+                v.append(Verdict("info", f"Possible lower price, unconfirmed: {m(Decimal(cheap['price']))} "
+                                         f"as {persona_label(cheap['persona'])}",
+                                 "This was read from the page text, not the shop's product data, so it may "
+                                 "be a used copy, another seller or another edition." + ev +
+                                 " To try it, open the page on that kind of device, signed out."))
 
     # 3. surge pricing
     current = Decimal(item["current_price"]) if item["current_price"] else None
@@ -240,8 +255,8 @@ def report(s: Settings, db: DB, item_id: int) -> FairReport:
                              f"Now {m(current)} vs typical {m(typical)} ({diff:+.1f}%)."))
 
     return FairReport(baseline, fair_price,
-                      [(persona_label(r["persona"]), Decimal(r["price"]) if r["price"] else None, r["error"])
-                       for r in latest_rows],
+                      [(persona_label(r["persona"]), Decimal(r["price"]) if r["price"] else None, r["error"],
+                        r["method"], r["context"]) for r in latest_rows],
                       seen, v, cheapest_time(db, item_id), last_run)
 
 

@@ -104,7 +104,8 @@ class CLITests(unittest.TestCase):
 
     def test_find_better_adds_cheaper_shop(self):
         db = DB(self.s.db_path)
-        iid = db.add_item(url=self.shop_url, title="Acme Kettle AK-200 1.7L", price="49.99",
+        # no model number in this title, so the AI is asked (a shared model number skips it)
+        iid = db.add_item(url=self.shop_url, title="Acme Kettle 1.7L", price="49.99",
                           currency="GBP", interval_minutes=1440)
         CALLS.clear()
         code, out = self.run_cli(cli.find_better, iid)

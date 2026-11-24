@@ -421,8 +421,16 @@ def render_fair(app: App, it) -> str:
     running = app.fair.is_running(it["id"])
     verdicts = "".join(f'<div class="verdict {v.level}"><b>{e(v.title)}</b><p>{e(v.detail)}</p></div>'
                        for v in r.verdicts) or '<p class="empty">Not enough data yet.</p>'
+    def evidence(method, ctx):
+        if not method:
+            return ""
+        sure = method.split("+")[0] in ("jsonld", "microdata", "meta")
+        tag = ('<span class="badge good">shop data</span>' if sure
+               else '<span class="badge warn" title="Read from the page text; could be used, another seller or edition">page text</span>')
+        return f'{tag}<div class="evidence">{e(ctx)}</div>' if ctx and not sure else tag
     rows = "".join(f"<tr><td>{e(label)}</td><td class='num'>{e(fmt_price(p, cur)) if p is not None else ''}</td>"
-                   f"<td class='muted'>{e(err or '')}</td></tr>" for label, p, err in r.latest)
+                   f"<td class='muted'>{evidence(meth, ctx) if p is not None else e(err or '')}</td></tr>"
+                   for label, p, err, meth, ctx in r.latest)
     if r.seen is not None:
         rows = f"<tr><td><b>You (your browser)</b></td><td class='num'><b>{e(fmt_price(r.seen, cur))}</b></td><td></td></tr>" + rows
     when = f'<p class="muted">Timing tip: {e(r.cheapest_when)}.</p>' if r.cheapest_when else ""
@@ -431,7 +439,8 @@ def render_fair(app: App, it) -> str:
 <p class="big">{e(fmt_price(r.fair_price, cur))}</p></div>
 <div><span class="muted">Anonymous baseline now</span><p class="big">{e(fmt_price(r.baseline, cur))}</p></div></div>
 {verdicts}{when}
-{'<table class="list"><thead><tr><th>Shopper profile</th><th class="num">Price</th><th></th></tr></thead><tbody>' + rows + '</tbody></table>' if rows else ''}
+{'<table class="list"><thead><tr><th>Shopper profile</th><th class="num">Price</th><th>Where it was found</th></tr></thead><tbody>' + rows + '</tbody></table>' if rows else ''}
+<p class="muted"><a href="{e(it['url'])}" target="_blank" rel="noopener noreferrer">Open this product page ↗</a> to compare yourself (try a private window, signed out).</p>
 <p class="muted">Last anonymous check: {e(ago(r.last_run))}</p>
 <div class="row">
 <form method="post" action="/items/{it['id']}/fair">{csrf_field(app)}<button {"disabled" if running else ""}>{"Checking…" if running else "Check as anonymous shoppers"}</button></form>

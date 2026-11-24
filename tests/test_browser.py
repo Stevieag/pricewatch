@@ -97,7 +97,7 @@ class FairPersonasThroughBrowser(unittest.TestCase):
                 self.assertEqual(fair.run_personas(s, db, iid), len(fair.BROWSER_LANGS))
                 rep = fair.report(s, db, iid)
                 self.assertEqual(str(rep.baseline), "699.00")
-                labels = {label: err for label, _, err in rep.latest}
+                labels = {label: err for label, _, err, *_ in rep.latest}
                 self.assertIn("Anonymous browser · German", labels)
                 self.assertIn("device imitation", labels["iPhone · Safari"])
         finally:

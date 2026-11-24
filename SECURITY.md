@@ -44,10 +44,11 @@ secrets into an agent chat, either.
 
 ## 4. The app's own AI agent (v2)
 
-The LLM receives only truncated product titles, prices, and URLs cut down to
-`scheme://host/path`. It never receives query strings (they can carry session or
+The LLM receives only truncated product titles, prices, URLs cut down to
+`scheme://host/path`, and your own feedback notes about a shop (capped at 600 characters and
+labelled as guidance, not instructions). It never receives query strings (they can carry session or
 affiliate tokens), raw page HTML, config, or database contents. It has no tools. Its
-output is parsed as strict JSON for one field (`query` or `same`), and every price it
+output is parsed as strict JSON (`query`, or `same` + `full_price`), and every price it
 "finds" is independently fetched and verified by PriceWatch. Text planted on a shop page
 to inject instructions can, at worst, flip one yes/no match. You can delete any
 alternative it adds.

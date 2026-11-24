@@ -106,3 +106,16 @@ button.small { padding: .3rem .55rem; font-size: 13px; }
 .alert-banner { border-left: 4px solid var(--good); background: var(--good-bg); }
 .alert-banner h2 { color: var(--good); }
 .alert-banner ul { margin: .25rem 0 0; padding-left: 1.2rem; }
+
+/* feedback for the AI */
+.badge.bad { background: var(--bad-bg); color: var(--bad); }
+tr.review-suspect td, tr.review-wrong td { background: var(--warn-bg); }
+.review-note { font-size: 13px; color: var(--warn); margin-top: .15rem; }
+details.feedback { margin-top: .35rem; font-size: 13px; }
+details.feedback summary, details.skipped summary { cursor: pointer; color: var(--accent); }
+details.feedback .stack { margin-top: .5rem; gap: .45rem; }
+details.skipped { margin: .75rem 0; }
+.advice { margin: .75rem 0; font-size: 14px; }
+.advice h3 { font-size: .95rem; margin: 0 0 .25rem; }
+.advice ul { margin: 0; padding-left: 1.2rem; }
+form.inline { display: inline; margin-left: .5rem; }

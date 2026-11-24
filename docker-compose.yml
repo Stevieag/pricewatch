@@ -3,7 +3,7 @@
 #   docker compose up -d                      # v1/v3/v4: PriceWatch only
 #   docker compose --profile search up -d     # + SearXNG for the v2 agent
 #   docker compose --profile ai up -d         # + SearXNG + Ollama (fully local AI)
-#   docker compose exec ollama ollama pull llama3.1
+#   docker compose exec ollama ollama pull gemma4:e2b
 #
 # Config is read from OUTSIDE the repo (see SECURITY.md). Override with PW_ENV_FILE.
 x-env: &env

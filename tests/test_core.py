@@ -151,6 +151,32 @@ class TestSecrets(unittest.TestCase):
                                                  "PW_HOST": "127.0.0.1"})
 
 
+class TestSearchQueries(unittest.TestCase):
+    def test_clean_titles(self):
+        from pricewatch.agent import clean_title_for_search as c
+        cases = [
+            # the real Black+Decker title: brand x3 and a price in it
+            ("Black & Decker Black & Decker Black+Decker 1200W Hover Mower £62", "argos.co.uk",
+             "Black Decker 1200W Hover Mower"),
+            ("Flymo Easi Glide 300 Electric Hover Collect Lawnmower | Argos", "argos.co.uk",
+             "Flymo Easi Glide 300 Electric Hover Collect Lawnmower"),
+            # colour and platform after a separator are kept; only the shop name/slogan goes
+            ("Apple iPad mini A20 Pro 2026 8.5 Inch AI Wi-Fi 128GB - Starlight", "argos.co.uk",
+             "Apple iPad mini A20 Pro 2026 8.5 Inch AI Wi-Fi 128GB Starlight"),
+            ("Grand Theft Auto VI Standard Edition | Xbox Series X - Amazon.co.uk", "amazon.co.uk",
+             "Grand Theft Auto VI Standard Edition Xbox Series X"),
+            ("Sony WH-1000XM5 Headphones - Buy online at Currys", "currys.co.uk", "Sony WH-1000XM5 Headphones"),
+        ]
+        for title, domain, want in cases:
+            self.assertEqual(c(title, domain), want, title)
+
+    def test_two_searches_with_uk_hint(self):
+        from pricewatch.agent import PriceAgent
+        a = PriceAgent(load_settings({"PW_LLM_PROVIDER": "none"}), None)
+        qs = a.build_queries("Black & Decker Black+Decker 1200W Hover Mower £62", "GBP", "argos.co.uk")
+        self.assertEqual(qs, ["Black Decker 1200W Hover Mower UK"])
+
+
 class TestMatching(unittest.TestCase):
     def test_heuristic(self):
         self.assertTrue(heuristic_same_product("Sony WH-1000XM5 Wireless Headphones Black",

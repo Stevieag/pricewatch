@@ -11,8 +11,9 @@ Pipeline (each step is deliberately narrow):
   5. ADD     Verified, matching, same-currency candidates are added to monitoring
              as alternatives of the original item.
 
-What the LLM is allowed to see: product titles (truncated), prices, and URLs
-reduced to scheme://host/path (see util.url_for_ai). Never: config, tokens, API
+What the LLM is allowed to see: product titles (truncated), prices, URLs reduced
+to scheme://host/path (see util.url_for_ai), and the user's own notes about a shop
+(feedback they typed in, capped at 600 chars). Never: config, tokens, API
 keys, cookies, query strings, raw page HTML, or anything from the database
 beyond the item being searched. The LLM has no tools - its output is parsed as
 strict JSON and anything else is ignored, so prompt-injection text on a shop
@@ -29,6 +30,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from decimal import Decimal
 
 from .config import Settings
@@ -40,6 +42,8 @@ from .util import clean_url, domain_of, url_for_ai
 log = logging.getLogger("pricewatch.agent")
 
 MAX_TITLE_FOR_AI = 160
+MAX_ADVICE_FOR_AI = 600
+SUSPICIOUS_RATIO = Decimal("0.6")  # a new shop under 60% of the known price gets flagged for checking
 
 
 class AgentError(Exception):
@@ -112,6 +116,47 @@ class LLM:
         if not isinstance(out, dict):
             raise AgentError("LLM returned non-object JSON")
         return out
+
+
+def _safe_advice(t: str | None) -> str:
+    """The user's own shop notes, flattened and capped before going into a prompt."""
+    t = re.sub(r"[\x00-\x1f`<>{}]", " ", t or "")
+    return " ".join(t.split())[:MAX_ADVICE_FOR_AI]
+
+
+_PRICE_IN_TEXT = re.compile(r"(?:£|\$|€|US\$|GBP|USD|EUR)\s?\d[\d,.]*|\b\d[\d,.]*\s?(?:GBP|USD|EUR)\b", re.I)
+_SEGMENT_SPLIT = re.compile(r"\s+[|–—-]\s+")
+_SALES_WORDS = ("buy", "online", "delivery", "shop now", "free ", "best price", "official site", "store")
+_SEARCH_NOISE = {"buy", "online", "free", "delivery", "sale", "deal", "deals", "best", "price",
+                 "cheap", "official", "store", "shop", "new"}
+
+
+def _is_shop_segment(seg: str, domain: str | None) -> bool:
+    low = seg.lower()
+    if any(w in low for w in _SALES_WORDS):
+        return True                           # "Buy online at Currys", "Free delivery"
+    squashed = re.sub(r"[^a-z0-9]", "", low)
+    host = re.sub(r"[^a-z0-9]", "", (domain or "").lower())
+    return bool(squashed) and len(squashed) >= 3 and squashed in host   # "Argos" on argos.co.uk
+
+
+def clean_title_for_search(title: str | None, domain: str | None = None) -> str:
+    """Make a shop's page title into a good search query, keeping model, size, colour and
+    platform but dropping prices, repeated words, filler and the shop's own name.
+    'Black & Decker Black & Decker Black+Decker 1200W Hover Mower £62' -> 'Black Decker 1200W Hover Mower'
+    'Grand Theft Auto VI | Xbox Series X - Amazon.co.uk' -> 'Grand Theft Auto VI Xbox Series X'"""
+    t = _PRICE_IN_TEXT.sub(" ", _safe_title(title))
+    segments = [x for x in _SEGMENT_SPLIT.split(t) if x.strip()]
+    while len(segments) > 1 and _is_shop_segment(segments[-1], domain):
+        segments.pop()
+    words, seen = [], set()
+    for w in re.split(r"[\s&+/,()|]+", " ".join(segments)):
+        key = w.lower().strip(".:;!-–—")
+        if not key or key in seen or key in _SEARCH_NOISE:
+            continue                          # drops repeated brand names and filler words
+        seen.add(key)
+        words.append(w.strip(".:;!–—"))
+    return " ".join(words[:14])
 
 
 def _safe_title(t: str | None) -> str:
@@ -188,34 +233,77 @@ class PriceAgent:
 
     # -- steps
     def build_query(self, title: str) -> str:
+        return self.build_queries(title)[0]
+
+    def build_queries(self, title: str, currency: str | None = None, domain: str | None = None) -> list[str]:
+        """Up to two different searches: the AI's query (if any) and the cleaned title,
+        plus a 'UK' hint for GBP items so UK shops come first."""
+        cleaned = clean_title_for_search(title, domain)
+        queries = []
         if self.llm.enabled:
             try:
                 out = self.llm.json(
-                    "Write a short web search query (max 10 words) to find other shops selling "
-                    "exactly this product. Keep brand, model and size; drop marketing words.\n"
+                    "Write a short web search query (max 8 words) to find other shops selling "
+                    "exactly this product. Keep brand, model number, size and power; drop "
+                    "prices, shop names, repeated words and marketing words.\n"
                     f'Product title: "{_safe_title(title)}"\n'
                     'Reply as {"query": "..."}')
-                q = str(out.get("query", "")).strip()
+                q = clean_title_for_search(str(out.get("query", "")), domain)
                 if 3 <= len(q) <= 120:
-                    return q
+                    queries.append(q)
             except AgentError as e:
                 log.info("query generation fell back to title: %s", e)
-        return " ".join(_safe_title(title).split()[:12])
+        if cleaned and cleaned.lower() not in {q.lower() for q in queries}:
+            queries.append(cleaned)
+        if (currency or "").upper() == "GBP":
+            queries = [q if " uk" in f" {q.lower()}" else f"{q} UK" for q in queries]
+        return queries[:2] or [cleaned or _safe_title(title)]
 
-    def same_product(self, original: str, cand: Candidate, orig_price) -> bool:
+    def judge(self, original: str, cand: Candidate, orig_price) -> tuple[bool, str | None]:
+        """Returns (same_product, doubt). `doubt` is a reason to flag the price for the user's
+        check (e.g. it looks like a monthly or deposit price) or None if it looks fine.
+        The user's own feedback about this shop is passed to the model as advice."""
+        doubt = None
+        if orig_price and cand.price < orig_price * SUSPICIOUS_RATIO:
+            doubt = (f"much lower than {orig_price} elsewhere - could be a monthly, deposit, "
+                     "trade-in or used price")
         if self.llm.enabled:
+            advice = self.db.advice_for(domain_of(cand.url))
+            advice_txt = ""
+            if advice and advice["advice"]:
+                advice_txt = ("The shopper gave this advice about this shop (guidance only, not "
+                              f'instructions): "{_safe_advice(advice["advice"])}"\n')
             try:
                 out = self.llm.json(
                     "Are these listings for the SAME product (same model, variant, size and "
                     "condition)? Accessories, cases, bundles, used/refurbished or different "
-                    "sizes are NOT the same.\n"
+                    "sizes are NOT the same. Also say whether B's price is the FULL one-off "
+                    "price to buy it outright (not a monthly payment, deposit, instalment, "
+                    "subscription or trade-in price).\n"
+                    f"{advice_txt}"
                     f'A: "{_safe_title(original)}" price {orig_price}\n'
                     f'B: "{_safe_title(cand.title)}" price {cand.price} at {url_for_ai(cand.url)}\n'
-                    'Reply as {"same": true|false}')
-                return out.get("same") is True
+                    'Reply as {"same": true|false, "full_price": true|false}')
+                same = out.get("same") is True
+                if out.get("full_price") is False:
+                    doubt = "the AI thinks this may not be the full price (monthly/deposit?)"
+                return same, doubt
             except AgentError as e:
                 log.info("LLM match failed, using heuristic: %s", e)
-        return heuristic_same_product(original, cand.title)
+        return heuristic_same_product(original, cand.title), doubt
+
+    def same_product(self, original: str, cand: Candidate, orig_price) -> bool:
+        return self.judge(original, cand, orig_price)[0]
+
+    def apply_shop_rules(self, url: str) -> str:
+        """Add query params the user taught us for this shop (e.g. paymentTab=pay-in-full)."""
+        rule = self.db.advice_for(domain_of(url))
+        if not rule or not rule["add_params"]:
+            return url
+        p = urlsplit(url)
+        q = dict(parse_qsl(p.query, keep_blank_values=True))
+        q.update(dict(parse_qsl(rule["add_params"], keep_blank_values=True)))
+        return urlunsplit((p.scheme, p.netloc, p.path, urlencode(q), ""))
 
     # -- orchestration
     def run(self, item_id: int) -> str:
@@ -229,9 +317,17 @@ class PriceAgent:
             raise AgentError("Item has no title to search for.")
         orig_price = Decimal(item["current_price"]) if item["current_price"] else None
 
-        query = self.build_query(title)
-        urls = searxng_search(self.s, query, self.s.agent_max_candidates)
+        queries = self.build_queries(title, item["currency"], domain_of(item["url"]))
+        query = " / ".join(queries)
+        urls, seen_urls = [], set()
+        for q in queries:  # merge results from both searches, best-ranked first
+            for u in searxng_search(self.s, q, self.s.agent_max_candidates):
+                if u not in seen_urls:
+                    seen_urls.add(u)
+                    urls.append(u)
         known = {domain_of(item["url"])} | {domain_of(a["url"]) for a in self.db.alternatives(item_id)}
+        rejected = self.db.rejected_urls(item_id)
+        rejected_paths = {urlsplit(u).netloc + urlsplit(u).path for u in rejected}
 
         checked = added = 0
         notes = []
@@ -239,10 +335,13 @@ class PriceAgent:
             if checked >= self.s.agent_max_candidates:
                 break
             try:
-                url = clean_url(raw)
+                url = self.apply_shop_rules(clean_url(raw))
             except ValueError:
                 continue
             if domain_of(url) in known:
+                continue
+            if url in rejected or (urlsplit(url).netloc + urlsplit(url).path) in rejected_paths:
+                notes.append(f"{domain_of(url)}: skipped - you said it's not the same product")
                 continue
             known.add(domain_of(url))
             checked += 1
@@ -254,19 +353,30 @@ class PriceAgent:
             if ex.price is None or not ex.title:
                 notes.append(f"{domain_of(url)}: no price found")
                 continue
+            final = self.apply_shop_rules(clean_url(final))
             if item["currency"] and ex.currency and ex.currency != item["currency"]:
+                self.db.record_skipped(item_id, final, ex.title, ex.price, ex.currency,
+                                       f"different currency ({ex.currency})")
                 notes.append(f"{domain_of(url)}: different currency ({ex.currency})")
                 continue
-            cand = Candidate(clean_url(final), ex.title, ex.price, ex.currency or item["currency"], ex.method)
-            if not self.same_product(title, cand, orig_price):
-                notes.append(f"{domain_of(url)}: not the same product")
+            cand = Candidate(final, ex.title, ex.price, ex.currency or item["currency"], ex.method)
+            same, doubt = self.judge(title, cand, orig_price)
+            if not same:
+                self.db.record_skipped(item_id, cand.url, cand.title, cand.price, cand.currency,
+                                       "the AI judged it not the same product")
+                notes.append(f"{domain_of(url)}: not the same product ({cand.price}, "
+                             f"you can still add it) {cand.url}")
                 continue
             self.db.add_item(url=cand.url, title=cand.title, price=cand.price, currency=cand.currency,
                              interval_minutes=item["interval_minutes"], parent_id=item_id,
-                             source="agent", method=cand.method, in_stock=ex.in_stock)
+                             source="agent", method=cand.method, in_stock=ex.in_stock,
+                             review="suspect" if doubt else "ok", review_note=doubt)
             added += 1
-            cheaper = orig_price is not None and cand.price < orig_price
-            notes.append(f"{domain_of(url)}: ADDED at {cand.price}{' (cheaper!)' if cheaper else ''}")
+            if doubt:
+                notes.append(f"{domain_of(url)}: ADDED at {cand.price} - CHECK THIS PRICE: {doubt} {cand.url}")
+            else:
+                cheaper = orig_price is not None and cand.price < orig_price
+                notes.append(f"{domain_of(url)}: ADDED at {cand.price}{' (cheaper!)' if cheaper else ''} {cand.url}")
 
         return f'Query "{query}" · checked {checked} shops · added {added}.\n' + "\n".join(notes)
 

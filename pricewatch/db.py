@@ -60,7 +60,47 @@ CREATE TABLE IF NOT EXISTS fair_checks (
     checked_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS fair_item ON fair_checks(item_id, checked_at);
+
+-- user feedback on shops the agent found, and what PriceWatch learns from it
+CREATE TABLE IF NOT EXISTS feedback (
+    id         INTEGER PRIMARY KEY,
+    item_id    INTEGER,             -- the alternative the feedback was about (may be deleted later)
+    parent_id  INTEGER,
+    domain     TEXT NOT NULL,
+    kind       TEXT NOT NULL,       -- correct | not_same | wrong_price
+    note       TEXT,
+    created_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS shop_advice (
+    domain     TEXT PRIMARY KEY,
+    add_params TEXT,                -- query string to add to this shop's links, e.g. paymentTab=pay-in-full
+    advice     TEXT,                -- the user's notes, passed to the AI when judging this shop
+    updated_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS skipped (       -- shops the agent checked but did not add
+    parent_id  INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+    url        TEXT NOT NULL,
+    title      TEXT,
+    price      TEXT,
+    currency   TEXT,
+    reason     TEXT NOT NULL,
+    checked_at INTEGER NOT NULL,
+    PRIMARY KEY (parent_id, url)
+);
+CREATE TABLE IF NOT EXISTS rejected (
+    parent_id  INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+    url        TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (parent_id, url)
+);
 """
+
+# columns added after 0.1.0; applied automatically to existing databases
+MIGRATIONS = [
+    ("items", "review", "TEXT NOT NULL DEFAULT 'ok'"),   # ok | suspect | wrong | confirmed
+    ("items", "review_note", "TEXT"),
+]
+COUNTS_AS_PRICE = ("ok", "confirmed")  # review states whose price is trusted
 
 
 def now() -> int:
@@ -83,6 +123,10 @@ class DB:
             self._conn.execute("PRAGMA foreign_keys=ON")
             self._conn.execute("PRAGMA journal_mode=WAL")
             self._conn.executescript(SCHEMA)
+            for table, col, decl in MIGRATIONS:
+                cols = {r[1] for r in self._conn.execute(f"PRAGMA table_info({table})")}
+                if col not in cols:
+                    self._conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {decl}")
         if str(path) != ":memory:":
             try:
                 os.chmod(path, 0o600)
@@ -111,7 +155,8 @@ class DB:
     # ---------------------------------------------------------------- items
 
     def add_item(self, *, url, title, price, currency, interval_minutes, target_price=None,
-                 parent_id=None, source="user", method=None, in_stock=None) -> int:
+                 parent_id=None, source="user", method=None, in_stock=None,
+                 review="ok", review_note=None) -> int:
         t = now()
         with self.tx() as c:
             existing = c.execute(
@@ -122,10 +167,10 @@ class DB:
             cur = c.execute(
                 """INSERT INTO items(parent_id,url,title,currency,current_price,target_price,
                    interval_minutes,next_check_at,last_checked_at,extract_method,in_stock,
-                   source,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                   source,created_at,review,review_note) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (parent_id, url, title, currency, _s(price), _s(target_price), interval_minutes,
                  t + interval_minutes * 60, t if price is not None else None, method,
-                 _b(in_stock), source, t))
+                 _b(in_stock), source, t, review, review_note))
             iid = cur.lastrowid
             if price is not None:
                 c.execute("INSERT INTO prices(item_id,price,currency,checked_at) VALUES(?,?,?,?)",
@@ -164,7 +209,15 @@ class DB:
             SELECT i.*,
               (SELECT MIN(CAST(a.current_price AS REAL)) FROM items a
                  WHERE a.parent_id=i.id AND a.active=1 AND a.current_price IS NOT NULL
+                   AND a.review IN ('ok','confirmed')
                    AND IFNULL(a.currency,'')=IFNULL(i.currency,'')) AS best_alt_price,
+              (SELECT a.url FROM items a
+                 WHERE a.parent_id=i.id AND a.active=1 AND a.current_price IS NOT NULL
+                   AND a.review IN ('ok','confirmed')
+                   AND IFNULL(a.currency,'')=IFNULL(i.currency,'')
+                 ORDER BY CAST(a.current_price AS REAL) LIMIT 1) AS best_alt_url,
+              (SELECT COUNT(*) FROM items a WHERE a.parent_id=i.id AND a.active=1
+                 AND a.review IN ('suspect','wrong')) AS review_count,
               (SELECT COUNT(*) FROM items a WHERE a.parent_id=i.id) AS alt_count,
               (SELECT p.price FROM prices p WHERE p.item_id=i.id ORDER BY checked_at ASC LIMIT 1) AS first_price
             FROM items i WHERE i.parent_id IS NULL ORDER BY i.created_at DESC""")
@@ -191,6 +244,81 @@ class DB:
     def force_due(self, item_id: int):
         with self.tx() as c:
             c.execute("UPDATE items SET next_check_at=0 WHERE id=?", (item_id,))
+
+    # ---------------------------------------------------------------- feedback / learning
+
+    def set_review(self, item_id: int, review: str, note: str | None = None):
+        with self.tx() as c:
+            c.execute("UPDATE items SET review=?, review_note=? WHERE id=?", (review, note, item_id))
+
+    def set_url(self, item_id: int, url: str):
+        with self.tx() as c:
+            c.execute("UPDATE items SET url=?, next_check_at=0 WHERE id=?", (url, item_id))
+
+    def record_feedback(self, item, kind: str, note: str | None, domain: str):
+        with self.tx() as c:
+            c.execute("INSERT INTO feedback(item_id,parent_id,domain,kind,note,created_at) VALUES(?,?,?,?,?,?)",
+                      (item["id"], item["parent_id"], domain, kind, note, now()))
+
+    def reject_alternative(self, item) -> None:
+        """'Not the same product': remove it and never let the agent add that link again."""
+        with self.tx() as c:
+            c.execute("INSERT OR IGNORE INTO rejected(parent_id,url,created_at) VALUES(?,?,?)",
+                      (item["parent_id"], item["url"], now()))
+            c.execute("DELETE FROM skipped WHERE parent_id=? AND url=?", (item["parent_id"], item["url"]))
+            c.execute("DELETE FROM items WHERE id=?", (item["id"],))
+
+    def record_skipped(self, parent_id, url, title, price, currency, reason):
+        with self.tx() as c:
+            c.execute("""INSERT INTO skipped(parent_id,url,title,price,currency,reason,checked_at)
+                         VALUES(?,?,?,?,?,?,?) ON CONFLICT(parent_id,url) DO UPDATE SET
+                         title=excluded.title, price=excluded.price, currency=excluded.currency,
+                         reason=excluded.reason, checked_at=excluded.checked_at""",
+                      (parent_id, url, title, _s(price), currency, reason[:200], now()))
+
+    def skipped_for(self, parent_id: int):
+        """Skipped shops that had a price (the ones worth offering 'Add anyway' for), cheapest first."""
+        return self.q("""SELECT * FROM skipped WHERE parent_id=? AND price IS NOT NULL
+                         AND url NOT IN (SELECT url FROM items WHERE parent_id=?)
+                         ORDER BY CAST(price AS REAL)""", (parent_id, parent_id))
+
+    def pop_skipped(self, parent_id: int, url: str):
+        row = self.one("SELECT * FROM skipped WHERE parent_id=? AND url=?", (parent_id, url))
+        with self.tx() as c:
+            c.execute("DELETE FROM skipped WHERE parent_id=? AND url=?", (parent_id, url))
+        return row
+
+    def rejected_urls(self, parent_id: int) -> set[str]:
+        return {r["url"] for r in self.q("SELECT url FROM rejected WHERE parent_id=?", (parent_id,))}
+
+    def advice_for(self, domain: str):
+        return self.one("SELECT * FROM shop_advice WHERE domain=?", (domain,))
+
+    def all_advice(self):
+        return self.q("SELECT * FROM shop_advice ORDER BY domain")
+
+    def add_advice(self, domain: str, note: str) -> None:
+        """Append a note to a shop's advice (newest last, capped so prompts stay small)."""
+        note = " ".join(note.split())[:300]
+        if not note:
+            return
+        row = self.advice_for(domain)
+        notes = [n for n in ((row["advice"] or "").split("\n") if row else []) if n and n != note]
+        merged = "\n".join((notes + [note])[-5:])
+        with self.tx() as c:
+            c.execute("""INSERT INTO shop_advice(domain,advice,updated_at) VALUES(?,?,?)
+                         ON CONFLICT(domain) DO UPDATE SET advice=excluded.advice, updated_at=excluded.updated_at""",
+                      (domain, merged, now()))
+
+    def set_param_rule(self, domain: str, params: str) -> None:
+        with self.tx() as c:
+            c.execute("""INSERT INTO shop_advice(domain,add_params,updated_at) VALUES(?,?,?)
+                         ON CONFLICT(domain) DO UPDATE SET add_params=excluded.add_params, updated_at=excluded.updated_at""",
+                      (domain, params, now()))
+
+    def clear_advice(self, domain: str) -> None:
+        with self.tx() as c:
+            c.execute("DELETE FROM shop_advice WHERE domain=?", (domain,))
 
     def refresh_all(self) -> int:
         """Make every active listing (products and alternatives) due now."""

@@ -139,11 +139,11 @@ class Settings:
     # v2 - AI agent
     llm_provider: str = "none"  # none | ollama | openai_compatible | anthropic
     llm_base_url: str = "http://127.0.0.1:11434"
-    llm_model: str = "llama3.1"
+    llm_model: str = "gemma4:e2b"
     llm_api_key: Secret = field(default_factory=lambda: Secret(""))
     search_provider: str = "none"  # none | searxng
     searxng_url: str = "http://127.0.0.1:8888"
-    agent_max_candidates: int = 8
+    agent_max_candidates: int = 12
     agent_interval_hours: int = 0  # 0 = only on demand
 
     # v4 - fair price
@@ -217,11 +217,11 @@ def load_settings(env: dict[str, str] | None = None) -> Settings:
         scheduler_tick_seconds=max(1, _int(g("PW_SCHEDULER_TICK_SECONDS"), 20)),
         llm_provider=(g("PW_LLM_PROVIDER") or "none").lower(),
         llm_base_url=(g("PW_LLM_BASE_URL") or "http://127.0.0.1:11434").rstrip("/"),
-        llm_model=g("PW_LLM_MODEL") or "llama3.1",
+        llm_model=g("PW_LLM_MODEL") or "gemma4:e2b",
         llm_api_key=Secret(g("PW_LLM_API_KEY")),
         search_provider=(g("PW_SEARCH_PROVIDER") or "none").lower(),
         searxng_url=(g("PW_SEARXNG_URL") or "http://127.0.0.1:8888").rstrip("/"),
-        agent_max_candidates=_int(g("PW_AGENT_MAX_CANDIDATES"), 8),
+        agent_max_candidates=_int(g("PW_AGENT_MAX_CANDIDATES"), 12),
         agent_interval_hours=_int(g("PW_AGENT_INTERVAL_HOURS"), 0),
         fair_proxies=Secret(g("PW_FAIR_PROXIES")),
         fair_threshold_pct=_float(g("PW_FAIR_THRESHOLD_PCT"), 2.0),

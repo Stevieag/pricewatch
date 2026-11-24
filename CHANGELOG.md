@@ -4,6 +4,23 @@
 
 - Watchlist **Refresh all prices** button: re-checks everything now and auto-updates the
   page until done. Headless browsers are limited to two at once.
+- **Feedback for the AI**: mark each found shop *correct*, *wrong price* (with the corrected
+  link) or *not the same product*, and leave notes. Notes become per-shop advice in the AI's
+  prompt. Corrected links that add options (e.g. `?paymentTab=pay-in-full`) are learned per shop,
+  and rejected links are never re-added.
+- **Price doubt check**: new shops under 60% of the known price, or that the AI says aren't the
+  full one-off price, are flagged "check this price" and excluded from "best elsewhere"/alerts
+  until confirmed. The watchlist shows "⚠ N to check".
+- **Add anyway**: shops the agent checked but skipped are kept with their price and reason.
+- Better searches: titles are cleaned (repeated brands, prices, shop names removed), two
+  queries are run and merged, a "UK" hint is added for GBP items, and up to 12 shops are checked.
+- `pricewatch doctor`: checks the AI search setup (config, Ollama running, model downloaded
+  and answering in JSON, SearXNG, browser), with a fix for each failure.
+- `pricewatch find-better [ID]`: runs the AI price search from the terminal and shows what
+  it added and the best price elsewhere.
+- Cheaper prices come with a **link to the shop**: the watchlist's "Best elsewhere" price,
+  the alert banner, and `find-better` output all link straight to the product page.
+- Default local model is now `gemma4:e2b` (Ollama's quickstart model).
 - **Alert price** on every watchlist row: set or clear it inline, see hit / near / how far to
   go, and a banner listing products at or below their alert (another shop's price counts too).
 

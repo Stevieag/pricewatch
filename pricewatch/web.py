@@ -59,6 +59,18 @@ def ago(ts) -> str:
     return f"in {s}" if future else f"{s} ago"
 
 
+def _learn_params(old_url: str, new_url: str) -> str | None:
+    """If the corrected link is the same page plus extra options (e.g. ?paymentTab=pay-in-full),
+    return those options so they can be added to this shop's links in future."""
+    from urllib.parse import parse_qsl
+    o, n = urlsplit(old_url), urlsplit(new_url)
+    if (o.netloc, o.path.rstrip("/")) != (n.netloc, n.path.rstrip("/")):
+        return None
+    old_q = dict(parse_qsl(o.query, keep_blank_values=True))
+    added = {k: v for k, v in parse_qsl(n.query, keep_blank_values=True) if old_q.get(k) != v}
+    return urlencode(added) if added else None
+
+
 class App:
     def __init__(self, settings: Settings, db: DB, agent: PriceAgent, fair_runner=None):
         self.s, self.db, self.agent = settings, db, agent
@@ -165,7 +177,10 @@ def page_index(app: App, flash="") -> str:
         if it["best_alt_price"] is not None:
             b = Decimal(str(it["best_alt_price"]))
             cheaper = cur and b < Decimal(cur)
-            best = f'{fmt_price(b, it["currency"])}{" ✓ cheaper" if cheaper else ""}'
+            best = (f'<a href="{e(it["best_alt_url"])}" target="_blank" rel="noopener noreferrer" '
+                    f'title="Open this shop">{e(fmt_price(b, it["currency"]))} ↗</a>'
+                    f'{" ✓ cheaper" if cheaper else ""}'
+                    f'<div class="muted">at {e(domain_of(it["best_alt_url"]))}</div>')
         kind, alert_text = alert_status(it)
         if kind == "hit":
             hits.append(it)
@@ -179,7 +194,7 @@ def page_index(app: App, flash="") -> str:
 <td><a href="/items/{it['id']}">{e(it['title'] or domain_of(it['url']))}</a>
   <div class="muted">{e(domain_of(it['url']))}{'' if it['active'] else ' · paused'}</div></td>
 <td class="num">{e(fmt_price(cur, it['currency']))}</td><td class="num">{change}</td>
-<td class="num">{e(best)}<div class="muted">{it['alt_count']} alt.</div></td>
+<td class="num">{best}<div class="muted">{it['alt_count']} alt.{f' · <a href="/items/{it["id"]}">⚠ {it["review_count"]} to check</a>' if it["review_count"] else ''}</div></td>
 <td class="alert-col">{alert_cell}</td>
 <td>{e(human_interval(it['interval_minutes']))}<div class="muted">{status}</div></td></tr>""")
     table = (f"""<table class="list"><thead><tr><th>Product</th><th class="num">Price</th>
@@ -189,9 +204,14 @@ def page_index(app: App, flash="") -> str:
 
     banner = ""
     if hits:
-        links = "".join(f'<li><a href="/items/{h["id"]}">{e(h["title"] or domain_of(h["url"]))}</a>: '
-                        f'{e(fmt_price(min(Decimal(str(p)) for p in [h["current_price"], h["best_alt_price"]] if p is not None), h["currency"]))}'
-                        f' (alert {e(fmt_price(h["target_price"], h["currency"]))})</li>' for h in hits)
+        def hit_line(h):
+            here = Decimal(h["current_price"]) if h["current_price"] else None
+            alt = Decimal(str(h["best_alt_price"])) if h["best_alt_price"] is not None else None
+            price, url = (alt, h["best_alt_url"]) if alt is not None and (here is None or alt < here) else (here, h["url"])
+            return (f'<li><a href="/items/{h["id"]}">{e(h["title"] or domain_of(h["url"]))}</a>: '
+                    f'<a href="{e(url)}" target="_blank" rel="noopener noreferrer">{e(fmt_price(price, h["currency"]))} '
+                    f'at {e(domain_of(url))} ↗</a> (alert {e(fmt_price(h["target_price"], h["currency"]))})</li>')
+        links = "".join(hit_line(h) for h in hits)
         banner = (f'<section class="card alert-banner" role="status"><h2>🔔 {len(hits)} '
                   f'price{"s" if len(hits) != 1 else ""} at or below your alert</h2><ul>{links}</ul></section>')
 
@@ -255,6 +275,37 @@ def page_add(app: App, raw: str, seen: str = "", flash="") -> str:
     return layout(app, "Add", body, flash)
 
 
+REVIEW_BADGES = {
+    "suspect": '<span class="badge warn">⚠ check this price</span>',
+    "wrong": '<span class="badge bad">✕ wrong price</span>',
+    "confirmed": '<span class="badge good">✓ confirmed</span>',
+}
+
+
+def alt_row(app: App, a) -> str:
+    """One alternative shop: price, review status, and a feedback form for the AI."""
+    review = a["review"] or "ok"
+    note = f'<div class="review-note">{e(a["review_note"])}</div>' if a["review_note"] else ""
+    status = ('<span class="badge warn">⚠ check failed</span>' if a["last_error"]
+              else e(ago(a["last_checked_at"])))
+    open_attr = " open" if review in ("suspect", "wrong") else ""
+    return f"""<tr class="review-{e(review)}"><td><a href="{e(a['url'])}" rel="noopener noreferrer" target="_blank">
+{e(a['title'] or domain_of(a['url']))} ↗</a> {REVIEW_BADGES.get(review, '')}
+<div class="muted">{e(domain_of(a['url']))} · added by {e(a['source'])} · checked {status}</div>{note}
+<details class="feedback"{open_attr}><summary>Feedback for the AI</summary>
+<form method="post" action="/items/{a['id']}/feedback" class="stack">{csrf_field(app)}
+<label class="inline"><input type="radio" name="kind" value="correct" required> ✓ Correct: count this price</label>
+<label class="inline"><input type="radio" name="kind" value="wrong_price"> £ Wrong price (e.g. monthly or deposit)</label>
+<label class="inline"><input type="radio" name="kind" value="not_same"> ✕ Not the same product: remove it</label>
+<label>Correct link for this shop (optional), e.g. the "pay in full" page
+<input type="url" name="url" placeholder="{e(a['url'])}"></label>
+<label>Note for the AI about {e(domain_of(a['url']))} (optional)
+<input type="text" name="note" maxlength="300" placeholder="e.g. The first price shown is monthly; the full price is on the pay-in-full tab"></label>
+<button class="small">Send feedback</button></form></details></td>
+<td class="num">{e(fmt_price(a['current_price'], a['currency']))}</td>
+<td><form method="post" action="/items/{a['id']}/delete">{csrf_field(app)}<button class="link">remove</button></form></td></tr>"""
+
+
 def _range_since(rng: str):
     days = RANGES.get(rng, 30)
     return 0 if days is None else now() - days * 86400
@@ -293,12 +344,32 @@ def page_item(app: App, item_id: int, rng: str = "30d", flash="") -> str | None:
 <th class="num">Price</th></tr></thead><tbody>{table_rows}</tbody></table></details>"""
              if svg else '<p class="empty">No price history in this range yet.</p>')
 
-    alt_rows = "".join(f"""<tr><td><a href="{e(a['url'])}" rel="noopener noreferrer" target="_blank">
-{e(a['title'] or domain_of(a['url']))}</a><div class="muted">{e(domain_of(a['url']))} · added by {e(a['source'])}</div></td>
-<td class="num">{e(fmt_price(a['current_price'], a['currency']))}</td>
-<td>{'<span class="badge warn">⚠</span>' if a['last_error'] else e(ago(a['last_checked_at']))}</td>
-<td><form method="post" action="/items/{a['id']}/delete">{csrf_field(app)}<button class="link">remove</button></form></td></tr>"""
-                       for a in alts)
+    alt_rows = "".join(alt_row(app, a) for a in alts)
+    skipped = app.db.skipped_for(item_id)
+    skipped_html = ""
+    if skipped:
+        srows = "".join(f"""<tr><td><a href="{e(k['url'])}" rel="noopener noreferrer" target="_blank">
+{e(k['title'] or domain_of(k['url']))} ↗</a><div class="muted">{e(domain_of(k['url']))} · {e(k['reason'])}</div></td>
+<td class="num">{e(fmt_price(k['price'], k['currency']))}</td>
+<td><form method="post" action="/items/{item_id}/add-skipped">{csrf_field(app)}
+<input type="hidden" name="url" value="{e(k['url'])}"><button class="small">Add anyway</button></form></td></tr>"""
+                        for k in skipped)
+        skipped_html = (f'<details class="skipped"><summary>{len(skipped)} shop(s) the agent checked but '
+                        f'didn\'t add - add any you think are right</summary><table class="list"><tbody>{srows}'
+                        f'</tbody></table></details>')
+    advice_rows = [a for a in app.db.all_advice()
+                   if a["domain"] in {domain_of(x["url"]) for x in alts} | {domain_of(k["url"]) for k in skipped}]
+    advice_html = ""
+    if advice_rows:
+        items_html = "".join(
+            f'<li><b>{e(a["domain"])}</b>'
+            + (f' · links get <code>?{e(a["add_params"])}</code>' if a["add_params"] else "")
+            + (f'<div class="muted">{"<br>".join(e(n) for n in (a["advice"] or "").splitlines())}</div>' if a["advice"] else "")
+            + f'<form method="post" action="/advice/clear" class="inline">{csrf_field(app)}'
+              f'<input type="hidden" name="domain" value="{e(a["domain"])}">'
+              f'<input type="hidden" name="back" value="/items/{item_id}"><button class="link">forget</button></form></li>'
+            for a in advice_rows)
+        advice_html = f'<div class="advice"><h3>What PriceWatch has learned from your feedback</h3><ul>{items_html}</ul></div>'
     run = app.db.last_run(item_id)
     running = app.agent.is_running(item_id)
     run_html = ""
@@ -330,6 +401,7 @@ def page_item(app: App, item_id: int, rng: str = "30d", flash="") -> str | None:
 <section class="card"><h2>Other shops</h2>
 <p class="muted">{e(app.agent.status_text())}</p>{agent_btn}{run_html}
 {'<table class="list"><tbody>' + alt_rows + '</tbody></table>' if alts else '<p class="empty">No alternatives yet.</p>'}
+{skipped_html}{advice_html}
 <form method="post" action="/items/{item_id}/alternatives" class="row">{csrf_field(app)}
 <input type="text" name="url" placeholder="Add another shop's link yourself" required><button>Add</button></form>
 </section>
@@ -566,6 +638,11 @@ def make_handler(app: App):
 
             if path == "/items":
                 return self.create_item(f)
+            if path == "/advice/clear":
+                app.db.clear_advice(f.get("domain", ""))
+                back = f.get("back", "/")
+                back = back if back.startswith("/items/") or back == "/" else "/"
+                return self.redirect(back + "?" + urlencode({"msg": f"Forgot what PriceWatch learned about {f.get('domain', '')}."}))
             if path == "/refresh-all":
                 n = app.db.refresh_all()
                 return self.redirect("/?" + urlencode({"msg": f"Refreshing {n} listing(s). Shops that need a browser take ~10 s each."}))
@@ -614,6 +691,20 @@ def make_handler(app: App):
                 ok = app.agent.available and app.agent.run_in_background(iid)
                 msg = "Searching other shops… refresh in a minute." if ok else app.agent.status_text()
                 return self.redirect(back + "?" + urlencode({"msg": msg}))
+            if action == "feedback":
+                return self.feedback(it, f)
+            if action == "add-skipped":
+                k = app.db.pop_skipped(iid, f.get("url", ""))
+                if not k:
+                    return self.redirect(back + "?msg=That+shop+is+no+longer+in+the+list.")
+                aid = app.db.add_item(url=k["url"], title=k["title"], price=parse_price(k["price"]),
+                                      currency=k["currency"] or it["currency"],
+                                      interval_minutes=it["interval_minutes"], parent_id=iid,
+                                      source="you", review="confirmed",
+                                      review_note="Added by you from the agent's skipped list")
+                app.db.record_feedback(app.db.get_item(aid), "correct", "added from skipped list",
+                                       domain_of(k["url"]))
+                return self.redirect(back + "?" + urlencode({"msg": f"Added {domain_of(k['url'])} - it now counts as a price for this product."}))
             if action == "target":
                 raw = (f.get("target") or "").strip()
                 tp = parse_price(raw) if raw else None
@@ -651,6 +742,46 @@ def make_handler(app: App):
                 app.db.force_due(aid)
                 return self.redirect(back + "?msg=Added - first check runs shortly.".replace(" ", "+"))
             self.not_found()
+
+        def feedback(self, it, f):
+            """Feedback on an alternative: correct / wrong price (+ fixed link) / not the same."""
+            if not it["parent_id"]:
+                return self.redirect(f"/items/{it['id']}?msg=Feedback+is+for+shops+found+for+a+product.")
+            back = f"/items/{it['parent_id']}"
+            kind, note = f.get("kind", ""), " ".join((f.get("note") or "").split())[:300]
+            dom = domain_of(it["url"])
+            if kind not in {"correct", "wrong_price", "not_same"}:
+                return self.redirect(back + "?msg=Choose+one+of+the+options.")
+            new_url = None
+            if f.get("url", "").strip():
+                try:
+                    new_url = clean_url(extract_url(f["url"]) or "")
+                except ValueError as err:
+                    return self.redirect(back + "?" + urlencode({"msg": f"That link didn't work: {err}"}))
+                if domain_of(new_url) != dom:
+                    return self.redirect(back + "?" + urlencode(
+                        {"msg": f"The corrected link must be on {dom}. To add a different shop, use 'Add another shop'."}))
+            app.db.record_feedback(it, kind, note or None, dom)
+            if note:
+                app.db.add_advice(dom, note)
+            if kind == "not_same":
+                app.db.reject_alternative(it)
+                return self.redirect(back + "?" + urlencode({"msg": f"Removed {dom}. The agent won't add that link again."}))
+            if new_url and new_url != it["url"]:
+                learned = _learn_params(it["url"], new_url)
+                if learned:
+                    app.db.set_param_rule(dom, learned)
+                app.db.set_url(it["id"], new_url)
+                app.db.set_review(it["id"], "confirmed" if kind == "correct" else "ok",
+                                  "Link corrected by you" + (f"; future {dom} links get ?{learned}" if learned else ""))
+                return self.redirect(back + "?" + urlencode({"msg": f"Link updated for {dom}; re-checking the price now."
+                                                                    + (f" Future {dom} links will use ?{learned}." if learned else "")}))
+            if kind == "correct":
+                app.db.set_review(it["id"], "confirmed", "Confirmed by you")
+                return self.redirect(back + "?" + urlencode({"msg": f"Thanks - {dom}'s price now counts."}))
+            app.db.set_review(it["id"], "wrong", note or "You marked this price as wrong")
+            return self.redirect(back + "?" + urlencode(
+                {"msg": f"Marked {dom}'s price as wrong; it won't count until you give the correct link."}))
 
         def api_share(self, f):
             if not app.bearer_ok(self.headers.get("Authorization")):

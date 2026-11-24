@@ -168,6 +168,8 @@ class E2E(unittest.TestCase):
         self.assertEqual(alts[0]["source"], "agent")
         _, html, _ = self.req("/")
         self.assertIn("cheaper", html)
+        # best-elsewhere price links straight to the cheaper shop, in a new tab
+        self.assertRegex(html, r'<a href="http://localhost:\d+/other/kettle" target="_blank" rel="noopener noreferrer"')
 
     def test_08_api_share_needs_bearer(self):
         payload = json.dumps({"url": self.shop_url + "?ref=share", "frequency": "6h", "seen": "47.50"}).encode()
@@ -199,6 +201,7 @@ class E2E(unittest.TestCase):
         self.assertIn("Alert set", html)
         self.assertIn("at or below your alert", html)
         self.assertIn("✓ hit", html)
+        self.assertIn("↗</a> (alert £50.00)", html)  # banner links to the shop with the price
 
         # alert below the price -> no banner, shows how far to go
         st, html, _ = self.req(f"/items/{iid}/target", {"target": "30", "csrf": self.csrf()})

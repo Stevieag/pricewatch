@@ -40,7 +40,7 @@ Re-check everything in your database right now: `python3 -m pricewatch check-all
 ```bash
 docker compose up -d                       # PriceWatch only
 docker compose --profile ai up -d          # + SearXNG + Ollama
-docker compose exec ollama ollama pull llama3.1
+docker compose exec ollama ollama pull gemma4:e2b
 ```
 
 > The Docker image has no browser, so shops that block plain requests (e.g. Argos) can't be
@@ -92,6 +92,28 @@ a schedule.
    accessories, other sizes and refurbished units. With no LLM configured, a strict
    heuristic does the matching (model numbers must match).
 5. Matches in the same currency are added as monitored alternatives. You can remove any of them.
+
+**Setting it up on a Mac:** install Docker Desktop and Ollama, then run
+`ollama pull gemma4:e2b` and `docker compose --profile search up -d searxng`. Set
+`PW_SEARCH_PROVIDER=searxng` and `PW_LLM_PROVIDER=ollama` in your env file. Then:
+
+```bash
+python3 -m pricewatch doctor          # checks config, Ollama, the model, SearXNG and the browser
+python3 -m pricewatch find-better     # search for every product now (or: find-better 3)
+```
+
+**Teaching the agent (feedback for the AI).** Prices far below the rest (under 60%), or that
+the AI thinks aren't the full price, are added but marked **⚠ check this price**. They don't
+count as cheaper, or trigger alerts, until you confirm them. Under each shop on the product page:
+- **✓ Correct**: the price counts.
+- **£ Wrong price**: paste the right link, e.g. O2's `?paymentTab=pay-in-full` page. If the new
+  link is the same page with extra options, PriceWatch adds them to that shop's links in future.
+- **✕ Not the same product**: removed, and the agent never re-adds that link.
+- **A note** ("£20 is monthly…") is passed to the AI as advice whenever it judges that shop again.
+
+Shops the agent checked but didn't add are listed with their price and the reason, with
+**Add anyway** for when you know better. Product titles are cleaned before searching
+(repeated brand names, prices and shop names removed), and two searches are run and combined.
 
 You can also add another shop's link by hand. `PW_LLM_PROVIDER` can be `ollama`
 (recommended, fully local), `openai_compatible` (LM Studio, llama.cpp, vLLM…) or

@@ -1,4 +1,5 @@
-"""CLI:  python -m pricewatch [serve | check URL | check-all [--no-fair] | config | gen-token]"""
+"""CLI:  python -m pricewatch [serve | check URL | check-all [--no-fair] | doctor |
+                             find-better [ID] | config | gen-token]"""
 from __future__ import annotations
 
 import argparse
@@ -24,6 +25,9 @@ def main(argv=None) -> int:
     c.add_argument("url")
     ca = sub.add_parser("check-all", help="re-check every product in your database now")
     ca.add_argument("--no-fair", action="store_true", help="skip the Fair Price check (faster)")
+    sub.add_parser("doctor", help="check the AI search setup (Ollama, SearXNG, browser)")
+    fb = sub.add_parser("find-better", help="run the AI price search on your products")
+    fb.add_argument("id", nargs="?", type=int, help="one product id (default: all products)")
     ap.add_argument("-v", "--verbose", action="store_true")
     args = ap.parse_args(argv)
 
@@ -51,6 +55,10 @@ def main(argv=None) -> int:
 
     if args.cmd == "check-all":
         return check_all(s, fair_check=not args.no_fair)
+    if args.cmd == "doctor":
+        return doctor(s)
+    if args.cmd == "find-better":
+        return find_better(s, args.id)
 
     problems = validate_settings(s)
     if problems:
@@ -76,6 +84,119 @@ def main(argv=None) -> int:
         sched.stop()
         httpd.server_close()
     return 0
+
+
+def doctor(s) -> int:
+    """Check every moving part of the AI price search, with a fix for each failure."""
+    import json as _json
+    import urllib.request
+
+    from .agent import LLM, AgentError, searxng_search
+    from .fetcher import find_browser
+
+    results = []
+
+    def step(name, ok, detail="", fix=""):
+        results.append(ok)
+        print(f"  {'PASS' if ok else 'FAIL'}  {name}{'  - ' + detail if detail else ''}")
+        if not ok and fix:
+            print(f"        fix: {fix}")
+
+    print("PriceWatch doctor\n")
+    step("Config file found", s.env_file is not None, str(s.env_file or ""),
+         "cp .env.example ~/.config/pricewatch/pricewatch.env && chmod 600 ~/.config/pricewatch/pricewatch.env")
+    step("Search switched on", s.search_provider == "searxng", f"PW_SEARCH_PROVIDER={s.search_provider}",
+         "set PW_SEARCH_PROVIDER=searxng in ~/.config/pricewatch/pricewatch.env")
+    step("AI matching switched on", s.llm_provider != "none", f"PW_LLM_PROVIDER={s.llm_provider}",
+         "set PW_LLM_PROVIDER=ollama (optional: without it a strict heuristic is used)")
+
+    if s.llm_provider == "ollama":
+        try:
+            with urllib.request.urlopen(f"{s.llm_base_url}/api/tags", timeout=5) as r:
+                names = [m.get("name", "") for m in _json.loads(r.read().decode()).get("models", [])]
+            step("Ollama running", True, s.llm_base_url)
+            have = any(n == s.llm_model or n.split(":")[0] == s.llm_model or n == s.llm_model + ":latest"
+                       for n in names)
+            step(f"Model {s.llm_model} downloaded", have, ", ".join(names[:5]) or "no models",
+                 f"ollama pull {s.llm_model}")
+            if have:
+                import time
+                t = time.time()
+                try:
+                    out = LLM(s).json('Reply with exactly this JSON: {"ok": true}')
+                    step("Model answers in JSON", out.get("ok") is True, f"{time.time() - t:.1f}s")
+                except AgentError as e:
+                    step("Model answers in JSON", False, str(e))
+        except Exception as e:  # noqa: BLE001
+            step("Ollama running", False, f"{type(e).__name__} at {s.llm_base_url}",
+                 "open the Ollama app (or run: ollama serve)")
+
+    if s.search_provider == "searxng":
+        try:
+            urls = searxng_search(s, "apple ipad mini", 5)
+            step("SearXNG search works", bool(urls), f"{len(urls)} results from {s.searxng_url}",
+                 "check the SearXNG engines; try again in a minute")
+        except AgentError as e:
+            step("SearXNG search works", False, str(e),
+                 "open Docker Desktop, then: docker compose --profile search up -d searxng")
+
+    b = find_browser(s.browser_path)
+    step("Browser for blocked shops", bool(b), b or "none", "install Firefox or Chrome")
+    ok = all(results)
+    print(f"\n{'All good - try: python3 -m pricewatch find-better' if ok else 'Fix the FAIL lines above, then run doctor again.'}")
+    return 0 if ok else 1
+
+
+def find_better(s, item_id=None) -> int:
+    """Run the v2 agent now, in the foreground, and print what it found."""
+    import time
+
+    from .agent import AgentError, PriceAgent
+    from .util import domain_of, fmt_price
+
+    if not s.db_path.exists():
+        print("No database yet. Add products with: python3 -m pricewatch serve")
+        return 1
+    db = DB(s.db_path)
+    agent = PriceAgent(s, db)
+    if not agent.available:
+        print(agent.status_text() + "\nRun: python3 -m pricewatch doctor")
+        return 1
+    items = ([db.get_item(item_id)] if item_id else
+             db.q("SELECT * FROM items WHERE parent_id IS NULL AND active=1 ORDER BY id"))
+    items = [i for i in items if i]
+    if not items:
+        print("No matching products.")
+        return 1
+    print(f"{agent.status_text()}\n")
+    failed = 0
+    for it in items:
+        name = (it["title"] or domain_of(it["url"]))[:60]
+        print(f"[{it['id']}] {name} - {fmt_price(it['current_price'], it['currency'])} at {domain_of(it['url'])}")
+        t = time.time()
+        try:
+            summary = agent.run(it["id"])
+            for line in summary.splitlines():
+                print("    " + line)
+        except AgentError as e:
+            failed += 1
+            print(f"    FAILED: {e}")
+        alts = db.alternatives(it["id"])
+        for a in alts:
+            if a["review"] in ("suspect", "wrong"):
+                print(f"    ⚠ please check {domain_of(a['url'])} at {fmt_price(a['current_price'], a['currency'])}: "
+                      f"{a['review_note'] or 'flagged'}\n      {a['url']}\n"
+                      f"      (confirm or correct it under 'Feedback for the AI' on the product page)")
+        if alts:
+            best = min((a for a in alts if a["current_price"] and a["review"] in ("ok", "confirmed")),
+                       key=lambda a: float(a["current_price"]), default=None)
+            if best:
+                cheaper = it["current_price"] and float(best["current_price"]) < float(it["current_price"])
+                print(f"    best elsewhere: {fmt_price(best['current_price'], best['currency'])} at "
+                      f"{domain_of(best['url'])}{'  <- CHEAPER' if cheaper else ''}")
+                print(f"    link: {best['url']}")
+        print(f"    ({time.time() - t:.0f}s)\n")
+    return 0 if not failed else 1
 
 
 def check_all(s, fair_check: bool = True) -> int:

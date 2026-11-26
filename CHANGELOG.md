@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Repository protection: rulesets (PR + passing CI with no bypass, no force-push/deletion,
+  immutable release tags) exported for import, Dependabot for CI actions, CODEOWNERS,
+  CONTRIBUTING.md, issue/PR templates, and a maintainer checklist (`docs/repo-protection.md`).
 - **Licence changed from MIT to AGPL-3.0-or-later.** Source files carry SPDX licence
   identifiers. The web UI footer links to the source code (configurable with `PW_SOURCE_URL`
   for modified copies run for others, as AGPL section 13 requires).

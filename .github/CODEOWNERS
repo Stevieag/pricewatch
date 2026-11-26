@@ -1,0 +1,11 @@
+# Every change is owned by the maintainer. Security-sensitive paths are listed explicitly so
+# reviews of them are never skipped if more maintainers join later.
+*                         @Stevieag
+/.github/                 @Stevieag
+/scripts/check_secrets.py @Stevieag
+/pricewatch/config.py     @Stevieag
+/pricewatch/fetcher.py    @Stevieag
+/pricewatch/agent.py      @Stevieag
+/pricewatch/web.py        @Stevieag
+/SECURITY.md              @Stevieag
+/LICENSE                  @Stevieag

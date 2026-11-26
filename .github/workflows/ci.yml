@@ -20,7 +20,7 @@ jobs:
             os: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python }}
       # GitHub's Ubuntu runners ship Google Chrome, so the browser-fallback tests run too
@@ -32,7 +32,7 @@ jobs:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0          # scan full history, not just the last commit
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - name: Stdlib secret scanner

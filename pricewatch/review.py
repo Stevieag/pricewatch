@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Stevieag and PriceWatch contributors
 """Shared judgement about candidate shops and prices, used by the agent, the scheduled
 re-checks and the in-app search. Pure functions, no I/O."""
 from __future__ import annotations

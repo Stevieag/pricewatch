@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Stevieag and PriceWatch contributors
 """SQLite storage (stdlib only). One file, lives in the data dir, never in the repo."""
 from __future__ import annotations
 

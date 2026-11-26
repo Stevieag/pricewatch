@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Stevieag and PriceWatch contributors
 """Zero-dependency secret scanner. Fails (exit 1) if anything secret-looking would be committed.
 
 Usage:

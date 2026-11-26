@@ -16,6 +16,13 @@ PW_ACCESS_TOKEN=<output of: python -m pricewatch gen-token>
 
 Restart PriceWatch.
 
+PriceWatch also has to be **running** when you share, or the Shortcut will fail to connect.
+To keep it ready, run this once on the Mac:
+
+```
+python3 -m pricewatch autostart on
+```
+
 ## 2. Build the Shortcut (Shortcuts app → +)
 
 1. Tap the **ⓘ** details button → turn on **Show in Share Sheet** → accept **URLs** and **Text**.

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Stevieag and PriceWatch contributors
 """Rules from the real find-better run: non-shops, list pages, monthly offers, model numbers,
 and re-judging prices after every check."""
 import json

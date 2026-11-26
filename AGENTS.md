@@ -28,6 +28,11 @@ dumps. The LLM must stay tool-less, with JSON-only output.
 
 ## Project conventions
 
+- Licence: **AGPL-3.0-or-later**. New source files start with
+  `# SPDX-License-Identifier: AGPL-3.0-or-later`. Only add code you are allowed to
+  license under AGPL (no copying from incompatible sources). Keep the footer's
+  *Source code* link working.
+
 - Python ≥ 3.9, **standard library only** (no runtime dependencies — keeps the supply
   chain empty). Discuss before adding any dependency.
 - Tests: `python -m unittest discover -s tests`. Add a test for every bug fix.

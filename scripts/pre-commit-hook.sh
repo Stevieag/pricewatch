@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # Plain git hook (no pre-commit framework needed):
 #   ln -s ../../scripts/pre-commit-hook.sh .git/hooks/pre-commit
 set -e

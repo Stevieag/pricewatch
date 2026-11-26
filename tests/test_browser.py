@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Stevieag and PriceWatch contributors
 """Headless-browser fallback, against a fake shop that blocks non-browsers (like Argos)."""
 import threading
 import unittest

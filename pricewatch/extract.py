@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Stevieag and PriceWatch contributors
 """Pull a product title + price out of an HTML page.
 
 Strategy, most to least reliable:

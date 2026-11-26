@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Stevieag and PriceWatch contributors
 """v3 - price history chart, rendered server-side as SVG (no JS libraries, no CDN).
 
 Step lines (a price holds until the next check changes it), one y-axis, the

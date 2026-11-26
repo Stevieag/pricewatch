@@ -1,5 +1,7 @@
-"""CLI:  python -m pricewatch [serve | check URL | check-all [--no-fair] | doctor |
-                             find-better [ID] | config | gen-token]"""
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Stevieag and PriceWatch contributors
+"""CLI:  python -m pricewatch [start | stop [--all] | status | autostart on|off | serve | check URL |
+                             check-all [--no-fair] | doctor | find-better [ID] | config | gen-token]"""
 from __future__ import annotations
 
 import argparse
@@ -18,7 +20,14 @@ from .monitor import Scheduler, fetch_price
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="pricewatch")
     sub = ap.add_subparsers(dest="cmd")
-    sub.add_parser("serve", help="run the web UI + scheduler (default)")
+    st = sub.add_parser("start", help="start everything (SearXNG, Ollama, PriceWatch) in the background")
+    st.add_argument("--no-browser", action="store_true", help="don't open the browser")
+    sp = sub.add_parser("stop", help="stop PriceWatch and SearXNG")
+    sp.add_argument("--all", action="store_true", help="also quit Ollama and Docker Desktop")
+    sub.add_parser("status", help="show what's running")
+    au = sub.add_parser("autostart", help="start everything automatically when you log in (macOS)")
+    au.add_argument("action", choices=["on", "off", "status"])
+    sub.add_parser("serve", help="run the web UI + scheduler in this window (Ctrl+C to stop)")
     sub.add_parser("gen-token", help="print a random access token for PW_ACCESS_TOKEN")
     sub.add_parser("config", help="show effective config (secrets are never printed)")
     c = sub.add_parser("check", help="fetch one URL and print the extracted price")
@@ -67,6 +76,23 @@ def main(argv=None) -> int:
                           "found_in": ex.context, "in_stock": ex.in_stock}, indent=2, ensure_ascii=False))
         return 0
 
+    if args.cmd in ("start", "stop", "status", "autostart"):
+        from . import service
+        if args.cmd == "autostart":
+            return service.autostart(s, args.action)
+        if args.cmd == "status":
+            code = service.status(s)
+            if service.IS_MAC:
+                service.autostart(s, "status")
+            return code
+        if args.cmd == "stop":
+            return service.stop(s, everything=args.all)
+        problems = validate_settings(s)
+        if problems:
+            for p in problems:
+                print(f"[pricewatch] {p}", file=sys.stderr)
+            return 2
+        return service.start(s, open_browser=not args.no_browser)
     if args.cmd == "check-all":
         return check_all(s, fair_check=not args.no_fair)
     if args.cmd == "doctor":
@@ -87,7 +113,12 @@ def main(argv=None) -> int:
     sched = Scheduler(s, db, agent_runner=agent.run_in_background, fair_runner=fair.run_in_background)
     sched.start()
     httpd = serve(s, db, agent, fair)
-    print(f"PriceWatch running at http://{s.host}:{s.port}  (data: {s.data_dir})")
+    import signal
+
+    def _graceful(*_):  # `pricewatch stop` sends SIGTERM: shut down like Ctrl+C
+        raise KeyboardInterrupt
+    signal.signal(signal.SIGTERM, _graceful)
+    print(f"PriceWatch running at http://{s.host}:{s.port}  (data: {s.data_dir})", flush=True)
     if s.env_file is None:
         print("No env file found - using defaults. Copy .env.example to ~/.config/pricewatch/pricewatch.env")
     try:
@@ -165,6 +196,8 @@ def find_better(s, item_id=None) -> int:
     """Run the v2 agent now, in the foreground, and print what it found."""
     import time
 
+    from decimal import Decimal
+
     from .agent import AgentError, PriceAgent
     from .util import domain_of, fmt_price
 
@@ -206,8 +239,15 @@ def find_better(s, item_id=None) -> int:
                        key=lambda a: float(a["current_price"]), default=None)
             if best:
                 cheaper = it["current_price"] and float(best["current_price"]) < float(it["current_price"])
+                flag = ""
+                if cheaper:
+                    saving = Decimal(it["current_price"]) - Decimal(best["current_price"])
+                    pct = saving / Decimal(it["current_price"]) * 100
+                    flag = f"  ⚑ CHEAPER by {fmt_price(saving, best['currency'])} ({pct:.0f}%)"
+                    if sys.stdout.isatty():
+                        flag = f"\033[1;32m{flag}\033[0m"   # bold green in a terminal
                 print(f"    best elsewhere: {fmt_price(best['current_price'], best['currency'])} at "
-                      f"{domain_of(best['url'])}{'  <- CHEAPER' if cheaper else ''}")
+                      f"{domain_of(best['url'])}{flag}")
                 print(f"    link: {best['url']}")
         print(f"    ({time.time() - t:.0f}s)\n")
     return 0 if not failed else 1

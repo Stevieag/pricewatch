@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Stevieag and PriceWatch contributors
 """v2 - AI agent that hunts for better prices.
 
 Pipeline (each step is deliberately narrow):

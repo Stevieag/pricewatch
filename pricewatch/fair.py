@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Stevieag and PriceWatch contributors
 """v4 - Fair Price: detect personalised / surveillance pricing and surge pricing.
 
 Three independent signals, each explainable to the user:

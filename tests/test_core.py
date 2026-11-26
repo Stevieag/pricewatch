@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Stevieag and PriceWatch contributors
 import unittest
 from decimal import Decimal
 
@@ -203,6 +205,39 @@ class TestFairVerdictReliability(unittest.TestCase):
         rep = self._report([("desktop-win-en", "69.99", "jsonld", None),
                             ("iphone-safari", "74.99", "jsonld+browser", None)])
         self.assertTrue(any(v.title == "Price changes by device or profile" for v in rep.verdicts))
+
+
+class TestCheaperFlag(unittest.TestCase):
+    def test_flag(self):
+        from pricewatch.web import cheaper_flag
+        f = cheaper_flag("64.99", "69.99", "GBP")
+        self.assertIn("⚑ £5.00 cheaper (7%)", f)
+        self.assertIn('class="flag-cheaper"', f)
+        self.assertEqual(cheaper_flag("69.99", "69.99", "GBP"), "")   # same price: no flag
+        self.assertEqual(cheaper_flag("80", "69.99", "GBP"), "")      # dearer: no flag
+        self.assertEqual(cheaper_flag(None, "69.99", "GBP"), "")
+
+
+class TestLicenceNotice(unittest.TestCase):
+    """AGPL s.13: every page offers users the source; modified copies can point to theirs."""
+
+    def test_footer_links_to_source(self):
+        from pricewatch.web import layout
+
+        class FakeApp:
+            def __init__(self, env):
+                self.s = load_settings(env)
+        html = layout(FakeApp({}), "t", "b")
+        self.assertIn('href="https://github.com/Stevieag/pricewatch"', html)
+        self.assertIn("AGPL-3.0", html)
+        html = layout(FakeApp({"PW_SOURCE_URL": "https://example.org/fork"}), "t", "b")
+        self.assertIn('href="https://example.org/fork"', html)
+
+    def test_source_files_carry_spdx(self):
+        import pathlib
+        root = pathlib.Path(__file__).resolve().parent.parent
+        for f in list((root / "pricewatch").glob("*.py")) + list((root / "scripts").glob("*.py")):
+            self.assertIn("SPDX-License-Identifier: AGPL-3.0-or-later", f.read_text()[:300], f.name)
 
 
 class TestSearchQueries(unittest.TestCase):

@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Stevieag and PriceWatch contributors
 """Live end-to-end test against a REAL shop, on your own machine.
 
     python3 scripts/live_test.py ["https://shop.example/product/123"]

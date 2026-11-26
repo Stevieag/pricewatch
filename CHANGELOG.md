@@ -2,8 +2,18 @@
 
 ## Unreleased
 
+- **Licence changed from MIT to AGPL-3.0-or-later.** Source files carry SPDX licence
+  identifiers. The web UI footer links to the source code (configurable with `PW_SOURCE_URL`
+  for modified copies run for others, as AGPL section 13 requires).
 - Watchlist **Refresh all prices** button: re-checks everything now and auto-updates the
   page until done. Headless browsers are limited to two at once.
+- Cheaper prices get a bold green **⚑ £X cheaper (Y%)** flag and a green row stripe on the
+  watchlist and product page (trusted prices only), and a bold green line in `find-better`.
+- **`start` / `stop [--all]` / `status`**: one command starts Docker Desktop, SearXNG, Ollama
+  and PriceWatch in the background (waiting until each answers) and opens the browser; stop
+  shuts down PriceWatch and the SearXNG container, and with `--all` quits Ollama and Docker.
+- **`autostart on|off`** (macOS): a LaunchAgent runs `start` at login so the bookmarklet
+  always works.
 - **In-app search**: type a product name in the watchlist box (or open Search) to find shop
   pages via SearXNG, with non-shop and list pages hidden, and add any with **Watch this**.
 - Agent filters from a real run: skips social/video/news/review/price-comparison sites and

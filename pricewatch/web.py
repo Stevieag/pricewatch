@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Stevieag and PriceWatch contributors
 """Local web UI + small JSON API, stdlib only (http.server).
 
 Hardening for a "localhost" app (localhost is NOT automatically safe):
@@ -122,7 +124,9 @@ def layout(app: App, title: str, body: str, flash: str = "", auto_refresh: int =
 <header><a class="brand" href="/">PriceWatch</a>
 <nav><a href="/">Watchlist</a><a href="/search">Search</a><a href="/share">Share setup</a></nav></header>
 <main>{fl}{body}</main>
-<footer>v{__version__} · runs locally · <a href="https://github.com/Stevieag/pricewatch" rel="noopener noreferrer">open source</a></footer>
+<footer>PriceWatch v{__version__} · runs locally · free software under the
+<a href="https://www.gnu.org/licenses/agpl-3.0.html" rel="noopener noreferrer">AGPL-3.0</a> ·
+<a href="{e(app.s.source_url)}" rel="noopener noreferrer">Source code</a></footer>
 </body></html>"""
 
 
@@ -140,6 +144,18 @@ def freq_inputs(minutes: int = 1440) -> str:
                    for name, size in FORM_UNITS)
     return (f'<span class="freq">every <input type="number" name="every" min="1" value="{qty}" '
             f'required aria-label="How often"> <select name="unit" aria-label="Unit">{opts}</select></span>')
+
+
+def cheaper_flag(price, than, currency) -> str:
+    """Green flag for a price below the product's own: '⚑ £5.00 cheaper (7%)'. '' otherwise."""
+    if price is None or not than:
+        return ""
+    p, ref = Decimal(str(price)), Decimal(str(than))
+    if p >= ref or ref <= 0:
+        return ""
+    saving = ref - p
+    return (f'<span class="flag-cheaper" title="Cheaper than the shop you are watching">'
+            f'⚑ {e(fmt_price(saving, currency))} cheaper ({saving / ref * 100:.0f}%)</span>')
 
 
 def alert_status(it) -> tuple[str, str]:
@@ -174,12 +190,13 @@ def page_index(app: App, flash="") -> str:
                 cls = "down" if d < 0 else "up"
                 change = f'<span class="{cls}">{"▼" if d < 0 else "▲"} {fmt_price(abs(d), it["currency"])}</span>'
         best = ""
+        flag = ""
         if it["best_alt_price"] is not None:
             b = Decimal(str(it["best_alt_price"]))
-            cheaper = cur and b < Decimal(cur)
+            flag = cheaper_flag(b, cur, it["currency"])
             best = (f'<a href="{e(it["best_alt_url"])}" target="_blank" rel="noopener noreferrer" '
                     f'title="Open this shop">{e(fmt_price(b, it["currency"]))} ↗</a>'
-                    f'{" ✓ cheaper" if cheaper else ""}'
+                    f'{f"<div>{flag}</div>" if flag else ""}'
                     f'<div class="muted">at {e(domain_of(it["best_alt_url"]))}</div>')
         kind, alert_text = alert_status(it)
         if kind == "hit":
@@ -190,7 +207,7 @@ def page_index(app: App, flash="") -> str:
 <button class="small">Set</button></form>{f'<div class="alert-{kind}">{e(alert_text)}</div>' if alert_text else ''}"""
         status = (f'<span class="badge warn" title="{e(it["last_error"])}">⚠ check failed</span>'
                   if it["last_error"] else e(ago(it["last_checked_at"])))
-        rows.append(f"""<tr>
+        rows.append(f"""<tr{' class="row-cheaper"' if flag else ''}>
 <td><a href="/items/{it['id']}">{e(it['title'] or domain_of(it['url']))}</a>
   <div class="muted">{e(domain_of(it['url']))}{'' if it['active'] else ' · paused'}</div></td>
 <td class="num">{e(fmt_price(cur, it['currency']))}</td><td class="num">{change}</td>
@@ -334,14 +351,16 @@ REVIEW_BADGES = {
 }
 
 
-def alt_row(app: App, a) -> str:
+def alt_row(app: App, a, parent_price=None) -> str:
     """One alternative shop: price, review status, and a feedback form for the AI."""
     review = a["review"] or "ok"
     note = f'<div class="review-note">{e(a["review_note"])}</div>' if a["review_note"] else ""
     status = ('<span class="badge warn">⚠ check failed</span>' if a["last_error"]
               else e(ago(a["last_checked_at"])))
     open_attr = " open" if review in ("suspect", "wrong") else ""
-    return f"""<tr class="review-{e(review)}"><td><a href="{e(a['url'])}" rel="noopener noreferrer" target="_blank">
+    # only trusted prices get the green flag; flagged ones still need your check
+    flag = cheaper_flag(a["current_price"], parent_price, a["currency"]) if review in ("ok", "confirmed") else ""
+    return f"""<tr class="review-{e(review)}{' row-cheaper' if flag else ''}"><td><a href="{e(a['url'])}" rel="noopener noreferrer" target="_blank">
 {e(a['title'] or domain_of(a['url']))} ↗</a> {REVIEW_BADGES.get(review, '')}
 <div class="muted">{e(domain_of(a['url']))} · added by {e(a['source'])} · checked {status}</div>{note}
 <details class="feedback"{open_attr}><summary>Feedback for the AI</summary>
@@ -354,7 +373,7 @@ def alt_row(app: App, a) -> str:
 <label>Note for the AI about {e(domain_of(a['url']))} (optional)
 <input type="text" name="note" maxlength="300" placeholder="e.g. The first price shown is monthly; the full price is on the pay-in-full tab"></label>
 <button class="small">Send feedback</button></form></details></td>
-<td class="num">{e(fmt_price(a['current_price'], a['currency']))}</td>
+<td class="num">{e(fmt_price(a['current_price'], a['currency']))}{f"<div>{flag}</div>" if flag else ""}</td>
 <td><form method="post" action="/items/{a['id']}/delete">{csrf_field(app)}<button class="link">remove</button></form></td></tr>"""
 
 
@@ -396,7 +415,7 @@ def page_item(app: App, item_id: int, rng: str = "30d", flash="") -> str | None:
 <th class="num">Price</th></tr></thead><tbody>{table_rows}</tbody></table></details>"""
              if svg else '<p class="empty">No price history in this range yet.</p>')
 
-    alt_rows = "".join(alt_row(app, a) for a in alts)
+    alt_rows = "".join(alt_row(app, a, it["current_price"]) for a in alts)
     skipped = app.db.skipped_for(item_id)
     skipped_html = ""
     if skipped:
@@ -520,6 +539,8 @@ def page_share(app: App, base: str) -> str:
 <h2>Desktop: bookmarklet</h2>
 <p>Drag this to your bookmarks bar, then click it on any product page:
 <a class="pill on" href="{e(bm)}">+ PriceWatch</a></p>
+<p class="muted">PriceWatch has to be running for the bookmarklet to work. To keep it ready, run
+<code>python3 -m pricewatch autostart on</code> once and it starts whenever you log in.</p>
 <p class="muted">It also captures the price <i>you</i> are being shown (while signed in), so Fair Price can
 compare it with what anonymous shoppers get. Only the link and that price are sent, and only to this app.</p>
 <h2>Android / desktop Chrome: share sheet</h2>

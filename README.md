@@ -27,8 +27,19 @@ mkdir -p ~/.config/pricewatch
 cp .env.example ~/.config/pricewatch/pricewatch.env
 chmod 600 ~/.config/pricewatch/pricewatch.env
 
-python3 -m pricewatch serve        # → http://127.0.0.1:8765
+python3 -m pricewatch start        # starts SearXNG + Ollama (if used) + PriceWatch, opens the browser
 ```
+
+| Command | What it does |
+|---|---|
+| `python3 -m pricewatch start` | Starts everything in the background: Docker Desktop and SearXNG if search is on, Ollama if AI matching is on, then PriceWatch. Waits until each one answers, then opens http://127.0.0.1:8765 |
+| `python3 -m pricewatch status` | Shows what's running, plus whether start-at-login is on |
+| `python3 -m pricewatch stop` | Stops PriceWatch and the SearXNG container (no other containers are touched) |
+| `python3 -m pricewatch stop --all` | Also quits Ollama and Docker Desktop |
+| `python3 -m pricewatch autostart on` | macOS: start everything when you log in, so the bookmarklet always works (`off` to undo) |
+| `python3 -m pricewatch serve` | Runs PriceWatch in the current window instead (Ctrl+C to stop) |
+
+The background server logs to `~/.local/share/pricewatch/pricewatch.log`.
 
 Requires Python 3.9+ (the one built into macOS works). Nothing to `pip install`.
 
@@ -44,7 +55,7 @@ docker compose exec ollama ollama pull gemma4:e2b
 ```
 
 > The Docker image has no browser, so shops that block plain requests (e.g. Argos) can't be
-> read from inside it. For those, run PriceWatch directly with `python3 -m pricewatch serve`.
+> read from inside it. For those, run PriceWatch directly with `python3 -m pricewatch start`.
 > SearXNG and Ollama can still run in Docker alongside it.
 
 For the AI profile, set these in your env file:
@@ -62,6 +73,10 @@ There are four ways to add a product:
 3. **Share sheet** (Android / desktop Chrome): install PriceWatch as an app from the
    browser menu, and it appears as a share target.
 4. **iPhone Shortcut**: see [docs/ios-shortcut.md](docs/ios-shortcut.md).
+
+> The bookmarklet, share sheet and Shortcut all send the link to PriceWatch on your computer,
+> so **PriceWatch must be running**. If it isn't, the browser shows "can't connect" and nothing
+> is added. Run `python3 -m pricewatch autostart on` once (macOS) so it starts whenever you log in.
 
 PriceWatch fetches the page and finds the price. It tries, in order: schema.org
 JSON-LD, microdata, Open Graph product tags, then a text heuristic. You'll see the
@@ -244,6 +259,15 @@ and some bot protection picks up on that. If even that is blocked, check less of
 
 See [CHANGELOG.md](CHANGELOG.md) for what changed in each version.
 
-## License
+## Licence
 
-MIT, see [LICENSE](LICENSE). Respect each site's terms of service and robots rules.
+Copyright (C) 2026 Stevieag and PriceWatch contributors.
+
+PriceWatch is free software under the **GNU Affero General Public License v3.0 or later**
+(AGPL-3.0-or-later); see [LICENSE](LICENSE). You can use, study, change and share it. If you
+distribute a modified version, or **run a modified version as a service that other people
+use over a network**, you must offer those users its complete source code under the same
+licence (AGPL section 13). PriceWatch's footer has a *Source code* link for this. If you run
+a modified copy for others, set `PW_SOURCE_URL` to where your version's code is published.
+
+The licence covers the software only. Respect each site's terms of service and robots rules.

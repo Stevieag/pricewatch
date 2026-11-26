@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Chart hover: crosshair + tooltip showing every series' price at that moment.
 // Served from 'self' so the strict CSP (no inline scripts) holds.
 (function () {

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Stevieag and PriceWatch contributors
 """End-to-end: a fake shop + fake SearXNG on localhost, PriceWatch talking to both."""
 import json
 import re

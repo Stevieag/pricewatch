@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Stevieag and PriceWatch contributors
 """doctor + find-better CLI commands, against a fake Ollama and the fake shop/SearXNG."""
 import contextlib
 import io

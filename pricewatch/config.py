@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Stevieag and PriceWatch contributors
 """Configuration loading.
 
 Design goals:
@@ -152,6 +154,8 @@ class Settings:
     surge_threshold_pct: float = 15.0   # % above 30-day median that counts as a surge
     fair_interval_hours: int = 24       # automatic persona check per item; 0 = on demand only
 
+    source_url: str = "https://github.com/Stevieag/pricewatch"  # AGPL s.13: where users get the source
+
     env_file: Path | None = None
 
     @property
@@ -227,6 +231,7 @@ def load_settings(env: dict[str, str] | None = None) -> Settings:
         fair_threshold_pct=_float(g("PW_FAIR_THRESHOLD_PCT"), 2.0),
         surge_threshold_pct=_float(g("PW_SURGE_THRESHOLD_PCT"), 15.0),
         fair_interval_hours=_int(g("PW_FAIR_INTERVAL_HOURS"), 24),
+        source_url=g("PW_SOURCE_URL") or "https://github.com/Stevieag/pricewatch",
         env_file=env_file,
     )
     return s

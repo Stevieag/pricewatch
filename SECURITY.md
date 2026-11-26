@@ -101,7 +101,16 @@ visit is the meaningful comparison anyway.
 Tracking parameters (`utm_*`, `fbclid`, …) and anything that looks like a session or
 token are stripped from stored URLs.
 
-## 7. Repository scanning
+## 7. Background running and start at login
+
+`pricewatch start` runs the server as your user, in the background, still bound to
+`127.0.0.1`. Its log (`pricewatch.log`, `chmod 600`) and pid file live in the data folder.
+`autostart on` installs a per-user LaunchAgent (`~/Library/LaunchAgents/io.github.stevieag.pricewatch.plist`)
+that runs exactly `python3 -m pricewatch start --no-browser`. It has no root rights and no
+network listener of its own. `autostart off` removes it. `stop` only stops this project's
+`searxng` container, never other containers.
+
+## 8. Repository scanning
 
 - `scripts/check_secrets.py`: stdlib scanner for forbidden files and key patterns.
   Masks matches and never prints them.

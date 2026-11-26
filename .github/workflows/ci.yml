@@ -38,6 +38,6 @@ jobs:
       - name: Stdlib secret scanner
         run: python scripts/check_secrets.py
       - name: gitleaks
-        uses: gitleaks/gitleaks-action@v2
+        uses: gitleaks/gitleaks-action@v3
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -257,7 +257,8 @@ and some bot protection picks up on that. If even that is blocked, check less of
 - Per-site extraction rules contributed by the community
 - CSV export / import
 
-See [CHANGELOG.md](CHANGELOG.md) for what changed in each version.
+See [CHANGELOG.md](CHANGELOG.md) for what changed in each version, and
+[CONTRIBUTING.md](CONTRIBUTING.md) to get involved.
 
 ## Licence
 

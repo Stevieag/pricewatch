@@ -110,7 +110,20 @@ that runs exactly `python3 -m pricewatch start --no-browser`. It has no root rig
 network listener of its own. `autostart off` removes it. `stop` only stops this project's
 `searxng` container, never other containers.
 
-## 8. Repository scanning
+## 8. Repository protection
+
+`main` is protected by GitHub rulesets (exported in `.github/rulesets/`, steps in
+[docs/repo-protection.md](docs/repo-protection.md)):
+- **No deletion or force-push:** history can't be destroyed or rewritten, by anyone.
+- **Pull requests only:** squash merges, linear history, and merges only once tests (Python
+  3.9 and 3.12) and the secret scans pass. There is **no bypass**, including for admins and
+  AI tools.
+- **Release tags `v*`** can't be moved or deleted.
+
+CODEOWNERS covers every path. Dependabot proposes updates to the CI's third-party actions
+as pull requests that must pass CI. Workflows run with read-only tokens.
+
+## 9. Repository scanning
 
 - `scripts/check_secrets.py`: stdlib scanner for forbidden files and key patterns.
   Masks matches and never prints them.

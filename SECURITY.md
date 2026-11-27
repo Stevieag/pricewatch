@@ -65,9 +65,12 @@ to reach it. So PriceWatch has:
 - **CSRF token + Origin check on every form:** other sites can't add, delete, or change items.
 - **Strict CSP** (`script-src 'self'`, no inline JS), `X-Frame-Options: DENY`, `nosniff`,
   `no-referrer`.
-- Binds to `127.0.0.1` by default. It **refuses to start** on any other interface
-  without a `PW_ACCESS_TOKEN` (≥ 24 chars, constant-time comparison, `HttpOnly`
-  `SameSite=Strict` cookie).
+- Binds to `127.0.0.1` by default. It **refuses to start** without a `PW_ACCESS_TOKEN`
+  (≥ 24 chars, constant-time comparison, `HttpOnly` `SameSite=Strict` cookie) when bound to
+  any other interface, **or** when `PW_ALLOWED_HOSTS` lists another device's name (as with
+  `tailscale serve` or a reverse proxy). As a second line of defence, requests whose `Host`
+  isn't this computer are refused while no token is set. `python3 -m pricewatch set-token`
+  writes a token atomically into the env file and verifies it before showing it.
 - Request logs drop query strings.
 - JSON API writes (`/api/share`) need `Authorization: Bearer <token>`.
 

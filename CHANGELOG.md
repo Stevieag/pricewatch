@@ -5,6 +5,10 @@
 - `docs/remote-access.md`: when (not) to enable remote access, the safe Tailscale setup
   (`tailscale serve` + HTTPS + access token, never Funnel), hardening, and what never to do.
   The iPhone Shortcut guide and SECURITY.md now follow it.
+- PriceWatch refuses to start when `PW_ALLOWED_HOSTS` lists another device but no access
+  token is set, and refuses proxied requests while no token is set (closes a gap with
+  `tailscale serve`, reported by GitHub's AI security review). New `pricewatch set-token`
+  writes and verifies the token in the env file.
 - README screenshots (light and dark) made from demo data, plus
   `docs/screenshots/make_screenshots.py` to regenerate them.
 - CI hardening: actions pinned to commit SHAs (kept current by Dependabot), checkout without

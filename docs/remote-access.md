@@ -22,12 +22,15 @@ in to **your** Tailscale account can reach it, and the connection uses HTTPS.
    the same account on both.
 2. **Give PriceWatch an access token and allow your Tailscale address.** On the computer:
    ```bash
-   F=~/.config/pricewatch/pricewatch.env
-   T=$(python3 -m pricewatch gen-token); sed -i '' "s/^PW_ACCESS_TOKEN=.*/PW_ACCESS_TOKEN=$T/" "$F"; echo "$T"; unset T
+   python3 -m pricewatch set-token
    ```
-   (On Linux use `sed -i` without the `''`.) Store the printed token in your password
-   manager. Then add your computer's Tailscale name, shown in the Tailscale app (e.g.
-   `my-laptop.example-tailnet.ts.net`), to `PW_ALLOWED_HOSTS` in the same file.
+   This saves a new token in your config file, checks that it really was saved, and only
+   then shows it. Store it in your password manager. Then add your computer's Tailscale
+   name, shown in the Tailscale app (e.g. `my-laptop.example-tailnet.ts.net`), to
+   `PW_ALLOWED_HOSTS` in `~/.config/pricewatch/pricewatch.env`.
+
+   PriceWatch refuses to start if `PW_ALLOWED_HOSTS` lists another device's address but no
+   token is set, so a skipped or failed token step can't leave it open.
 3. **Share PriceWatch on your tailnet only, with HTTPS:**
    ```bash
    tailscale serve --bg 8765
@@ -53,9 +56,9 @@ The computer has to be awake with PriceWatch running; `python3 -m pricewatch aut
   in to it can add devices to your network. For extra protection, turn on
   [Tailnet Lock](https://tailscale.com/kb/1226/tailnet-lock), so new devices need your
   approval.
-- **Keep PriceWatch's access token set,** even on your private network. Rotate it (generate
-  a new one and restart) if a device is lost, and remove old devices from your Tailscale
-  admin page.
+- **Keep PriceWatch's access token set,** even on your private network. If a device is
+  lost, run `python3 -m pricewatch set-token` again and restart, which replaces the token
+  everywhere. Also remove old devices from your Tailscale admin page.
 
 ### Turn it off again
 
@@ -63,13 +66,13 @@ The computer has to be awake with PriceWatch running; `python3 -m pricewatch aut
 tailscale serve reset
 ```
 
-PriceWatch is then local-only again. You can also delete `PW_ACCESS_TOKEN` and the extra
-`PW_ALLOWED_HOSTS` entry if you like.
+PriceWatch is then local-only again. To remove the token too, first take your Tailscale name
+out of `PW_ALLOWED_HOSTS`, then delete the `PW_ACCESS_TOKEN` value and restart.
 
 ## Alternative: your own HTTPS reverse proxy (advanced)
 
 If you'd rather not use Tailscale, you can put PriceWatch behind a reverse proxy that adds
-HTTPS (for example Caddy) **on your home network only**. Set `PW_ACCESS_TOKEN`, add the
+HTTPS (for example Caddy) **on your home network only**. Run `python3 -m pricewatch set-token`, add the
 proxy's hostname to `PW_ALLOWED_HOSTS`, and keep PriceWatch bound to `127.0.0.1` with the
 proxy on the same machine. This takes more setup and maintenance, so Tailscale is the
 easier safe option for most people.
@@ -80,6 +83,9 @@ easier safe option for most people.
   internet. It's built for you, not for strangers.
 - **Don't use plain `http://` with your token** on networks you don't control. The token
   would travel unencrypted.
-- **Don't remove the access token** once anything other than your own computer can
-  reach PriceWatch. PriceWatch refuses to start on a network address without one, and
-  that check is there for good reason.
+- **Don't remove the access token** while anything other than your own computer can reach
+  PriceWatch, whether through Tailscale, a proxy or a network address. Without it, every
+  device that can reach PriceWatch could use it. PriceWatch guards against this: it won't
+  start without a token when `PW_HOST` is a network address or `PW_ALLOWED_HOSTS` lists
+  another device. It also refuses requests arriving through a proxy when no token is set.
+  Don't work around those checks.

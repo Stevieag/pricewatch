@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- CI hardening: actions pinned to commit SHAs (kept current by Dependabot), checkout without
+  persisted credentials, job time limits.
 - Repository protection: rulesets (PR + passing CI with no bypass, no force-push/deletion,
   immutable release tags) exported for import, Dependabot for CI actions, CODEOWNERS,
   CONTRIBUTING.md, issue/PR templates, and a maintainer checklist (`docs/repo-protection.md`).

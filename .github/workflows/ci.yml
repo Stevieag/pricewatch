@@ -4,12 +4,15 @@ on:
   push:
   pull_request:
 
+# Least privilege: CI can only read the code. Actions are pinned to full commit SHAs
+# (Dependabot keeps the pins up to date) so a re-tagged action can't change what runs.
 permissions:
   contents: read
 
 jobs:
   tests:
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -19,8 +22,10 @@ jobs:
           - python: "3.12"
             os: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7
         with:
           python-version: ${{ matrix.python }}
       # GitHub's Ubuntu runners ship Google Chrome, so the browser-fallback tests run too
@@ -28,16 +33,18 @@ jobs:
 
   secret-scan:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
           fetch-depth: 0          # scan full history, not just the last commit
-      - uses: actions/setup-python@v7
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7
         with:
           python-version: "3.12"
       - name: Stdlib secret scanner
         run: python scripts/check_secrets.py
       - name: gitleaks
-        uses: gitleaks/gitleaks-action@v3
+        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e  # v3
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

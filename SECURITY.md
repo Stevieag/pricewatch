@@ -121,7 +121,9 @@ network listener of its own. `autostart off` removes it. `stop` only stops this 
 - **Release tags `v*`** can't be moved or deleted.
 
 CODEOWNERS covers every path. Dependabot proposes updates to the CI's third-party actions
-as pull requests that must pass CI. Workflows run with read-only tokens.
+as pull requests that must pass CI. CI actions are pinned to full commit SHAs (so a
+re-tagged action can't change what runs), workflows run with read-only tokens and don't keep
+credentials after checkout, and jobs have time limits.
 
 ## 9. Repository scanning
 

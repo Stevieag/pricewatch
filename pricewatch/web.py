@@ -357,7 +357,7 @@ def page_add(app: App, raw: str, seen: str = "", flash="") -> str:
 
 
 def _title_from_url(url: str) -> str:
-    """'…/google-pixel-11-pro-xl-1-tb-obsidian-10307505.html' -> 'Google Pixel 11 Pro Xl 1 Tb Obsidian'."""
+    """'…/acme-phone-5-128-gb-blue-10307505.html' -> 'Acme Phone 5 128 Gb Blue'."""
     seg = [p for p in urlsplit(url).path.split("/") if p]
     words = re.sub(r"\.[a-z]{2,5}$", "", seg[-1] if seg else "").replace("_", "-").split("-")
     words = [w for w in words if w and not (w.isdigit() and len(w) >= 5)]
@@ -379,7 +379,7 @@ product page whenever you look again. PriceWatch won't check this link itself.</
 <form method="post" action="/items/manual" class="stack">{csrf_field(app)}
 <input type="hidden" name="url" value="{e(url)}">
 <label>Product name <input type="text" name="title" maxlength="200" value="{e(_title_from_url(url))}" required></label>
-<label>Price <input type="text" name="price" inputmode="decimal" placeholder="e.g. 1139.99" required></label>
+<label>Price <input type="text" name="price" inputmode="decimal" placeholder="e.g. 249.99" required></label>
 <label>Currency <select name="currency">{cur_opts}</select></label>
 <label>Compare with
 <select name="parent"><option value="">Nothing: watch it as its own product</option>{opts}</select></label>
@@ -871,7 +871,7 @@ def make_handler(app: App):
                 return self.redirect("/?" + urlencode({"msg": str(err)}))
             price = parse_price(f.get("price"))
             if price is None or price <= 0:
-                return self.html(page_manual(app, url, flash="Enter the price as a number, e.g. 1139.99"))
+                return self.html(page_manual(app, url, flash="Enter the price as a number, e.g. 249.99"))
             cur = f.get("currency") if f.get("currency") in ("GBP", "EUR", "USD") else "GBP"
             par = f.get("parent", "")
             parent = app.db.get_item(int(par)) if par.isdigit() else None

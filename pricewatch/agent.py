@@ -380,7 +380,7 @@ class PriceAgent:
             raise AgentError("Item has no title to search for.")
         orig_price = Decimal(item["current_price"]) if item["current_price"] else None
 
-        hint = option_hint(title)             # your size/frame, e.g. "15 (1000-1025) / Steel 28 mm"
+        hint = option_hint(title)             # your size/frame, e.g. "3 (300-325) / Steel 28 mm"
         queries = self.build_queries(strip_option_hint(title), item["currency"], domain_of(item["url"]))
         query = " / ".join(queries)
         urls, seen_urls = [], set()

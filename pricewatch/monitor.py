@@ -71,7 +71,7 @@ _FRAME_WORDS = {"steel", "fibre", "fiber", "fibreglass", "glassfibre", "glass", 
 
 def option_hint(title: str | None) -> str | None:
     """The size/frame PriceWatch added to a title for a Shopify link, e.g.
-    '… Awning (15 (1000-1025) / Steel 28 mm)' -> '15 (1000-1025) / Steel 28 mm'."""
+    '… Gazebo (3 (300-325) / Steel 28 mm)' -> '3 (300-325) / Steel 28 mm'."""
     t = (title or "").rstrip()
     if not t.endswith(")"):
         return None
@@ -80,7 +80,7 @@ def option_hint(title: str | None) -> str | None:
         depth += {")": 1, "(": -1}.get(t[i], 0)
         if depth == 0:
             inner = t[i + 1:-1].strip()
-            return inner if _RANGE.search(inner) else None   # a size range, e.g. "(1000-1025)"
+            return inner if _RANGE.search(inner) else None   # a size range, e.g. "(300-325)"
     return None
 
 
@@ -125,7 +125,7 @@ def _same_frame(want: set[str], got: set[str]) -> bool:
         return False
     extra = {w for w in got if not w.isdigit()} - want
     if wn and wn == gn:
-        extra -= {"easygrip"}   # Dorema's clamp name: "28mm EasyGrip Steel" is a 28 mm steel frame
+        extra -= {"easygrip"}   # a clamp brand name: "28mm EasyGrip Steel" is a 28 mm steel frame
     if extra:                    # a material/type you didn't choose
         return False
     # the word that makes your frame different (Mega, EasyGrip, Fibre…) must be there;
@@ -156,7 +156,7 @@ _ADDON = re.compile(r"([^\n()<>]{2,40})\((\d{1,2})\s*-\s*(\d{1,2})\)([^\n()<>]{0
 
 
 def _addon_lines(html: str) -> list[tuple[str, int, int, Decimal]]:
-    """Paid extras like '28mm Frame (15-19) (+£130.00)': (label, from size, to size, price)."""
+    """Paid extras like '28mm Frame (3-7) (+£30.00)': (label, from size, to size, price)."""
     import html as _h
     text = _h.unescape(re.sub(r"<[^>]+>", " ", html[:2_000_000]))
     out = []
@@ -171,8 +171,8 @@ def _addon_lines(html: str) -> list[tuple[str, int, int, Decimal]]:
 
 
 def _paid_options(html: str) -> list[tuple[str, Decimal]]:
-    """Options a shop prices as extras on top of the base price, e.g. Camping Online's
-    <option data-wapf-label="size 15-1000-1025" data-wapf-price="500"> or any
+    """Options a shop prices as extras on top of the base price, e.g. WAPF add-ons
+    <option data-wapf-label="size 3-300-325" data-wapf-price="50"> or any
     <option>size 15 (+£500.00)</option>. An option with no price adds nothing."""
     import html as _h
     out = []
@@ -207,8 +207,8 @@ def _page_has_frame_options(html: str, hint: str) -> bool:
 
 
 def _jsonld_offers(html: str) -> list[dict]:
-    """schema.org offers that name their option, e.g. Attwoolls (Magento): an AggregateOffer
-    whose offers have "sku": "ATTE2023-Size 16 (1015-1040cm)" and their own price."""
+    """schema.org offers that name their option, e.g. Magento: an AggregateOffer
+    whose offers have "sku": "ABC123-Size 4 (325-350cm)" and their own price."""
     out = []
     for m in re.finditer(r'<script[^>]+application/ld\+json[^>]*>(.*?)</script>', html[:2_000_000], re.S | re.I):
         try:
@@ -223,7 +223,7 @@ def _jsonld_offers(html: str) -> list[dict]:
                 continue
             if not isinstance(o, dict):
                 continue
-            # a variant (ProductGroup → hasVariant, e.g. Awning Ace) names its size; its offer
+            # a variant (schema.org ProductGroup → hasVariant) names its size; its offer
             # only has the price, so the offer inherits the variant's size as its label
             size = o.get("size") if isinstance(o.get("size"), str) else ""
             for k in ("@graph", "offers", "hasVariant"):
@@ -241,7 +241,7 @@ def _jsonld_offers(html: str) -> list[dict]:
 
 
 def _woo_selects(html: str) -> dict[str, list[str]]:
-    """WooCommerce option lists: {"attribute_pa_size": ["size-15-1000-1025-cm", …], …}."""
+    """WooCommerce option lists: {"attribute_pa_size": ["size-3-300-325-cm", …], …}."""
     import html as _h
     out = {}
     for m in re.finditer(r'<select\b[^>]*name="(attribute_[^"]+)"[^>]*>(.*?)</select>', html[:2_000_000], re.S | re.I):
@@ -255,8 +255,8 @@ _FREE_ITEM = re.compile(r'data-name="([^"]*\bfree\b[^"]*)"[^>]*data-price="0(?:\
 
 
 def _free_frame_upgrade(html: str, want: set[str]) -> str | None:
-    """A free add-on that gives you your frame, e.g. Standart Caravans' "FREE 28mm Steel Frame
-    Upgrade" bundled at £0 (WPC "bought together" item): its name, else None."""
+    """A free add-on that gives you your frame, e.g. a "FREE 28mm Steel Frame
+    Upgrade" bundled at £0 (WooCommerce WPC "bought together" item): its name, else None."""
     if not {w for w in want if w.isdigit()}:
         return None
     for m in _FREE_ITEM.finditer(html):
@@ -387,8 +387,8 @@ def _options(settings: Settings, url: str, html: str, ex: Extracted, hint: str |
         cand = (score, price.quantize(Decimal("0.01")), label, u, v.get("is_in_stock"), "woocommerce")
         best = cand if best is None or cand[0] > best[0] else best
     if best is not None and best[0] == 1 and (_words(_RANGE.sub(" ", hint)) & _FRAME_WORDS):
-        # your size, but the option names no frame: the frame may be a paid extra (Grantham:
-        # "28mm Frame (15-19) (+£130.00)"), or another option on the page
+        # your size, but the option names no frame: the frame may be a paid extra (e.g.
+        # "28mm Frame (3-7) (+£30.00)"), or another option on the page
         addon = _frame_addon(html, hint)
         if addon:
             label, extra = addon
@@ -410,7 +410,7 @@ def _options(settings: Settings, url: str, html: str, ex: Extracted, hint: str |
         best = cand if best is None or cand[0] > best[0] else best
     sizes = [(l, p) for l, p in _paid_options(html) if _RANGE.search(l)] if best is None else []
     if sizes and ex.price and _RANGE.search(hint):
-        # the size is a paid extra on a fixed base price (Camping Online: £1,479 + £500)
+        # the size is a paid extra on a fixed base price (e.g. base £400 + size £50)
         mine = [(l, p) for l, p in sizes if _option_score(hint, l) is not None]
         if not mine:
             return Extracted(title=ex.title, price=None, currency=ex.currency, method="none",
@@ -451,7 +451,7 @@ _SHOPIFY_MARK = re.compile(r"cdn\.shopify\.com|shopify\.(?:shop|theme)|myshopify
 
 def _variants_in_page(html: str, want: str = "") -> list[dict]:
     """Shopify pages embed variants as JSON (ShopifyAnalytics meta, product JSON scripts):
-    "variants":[{"id":…,"price":197900,…}], prices in pence. Pages also embed other products'
+    "variants":[{"id":…,"price":49900,…}], prices in pence. Pages also embed other products'
     variants (recommendations), so: the list containing the linked variant id, else the first
     list on the page (the product's own, in ShopifyAnalytics meta)."""
     lists: list[list[dict]] = []
@@ -566,7 +566,7 @@ def _hold_doubtful(db: DB, item, ex) -> bool:
 
 def _review_alternative(db: DB, item, ex) -> None:
     """After each check of another shop's listing, re-judge whether its price can be trusted
-    (e.g. O2 still reporting £20 after the link was corrected). Only you can clear a flag:
+    (e.g. a network shop still reporting £20 a month after the link was corrected). Only you can clear a flag:
     'confirmed' and 'wrong' are left alone."""
     if not item["parent_id"]:
         return

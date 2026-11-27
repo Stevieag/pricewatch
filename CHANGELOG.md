@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Your size and frame at every shop.** For products with options (e.g. awnings: size, frame,
+  colour), the agent and re-checks now select the option you watch, e.g. "15 (1000-1025) /
+  Steel 28 mm", on Shopify and WooCommerce shops, adding paid frame extras such as
+  "28mm Frame (15-19) (+£130)". Shops without your option are skipped and listed. Before this,
+  other shops' default option (often the smallest size) was compared, so they looked cheaper.
 - **Fair Price on Shopify shops** now checks the size/option your link selects. It compared
   the shop's lowest price (e.g. £2,430 for a smaller, canvas-only awning) with yours (£3,678);
   earlier checks of such links are ignored once a correct one exists.

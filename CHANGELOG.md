@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Shopify shops: the right size or option.** Shopify puts the product's lowest variant price
+  in its page data, so a link to a bigger size read too low (a £1,979 awning showed £1,389).
+  PriceWatch now reads the linked variant's own price from the shop's `/products/<name>.js`
+  data (or the shop's default option when the link has no `?variant=`). The prices are read from
+  the page itself where Shopify embeds them, so no extra request is needed (shops rate-limit).
 - Phone deal and comparison sites (Smartphone Checker, Uswitch, MoneySuperMarket and others) are
   no longer treated as shops; the Google Store now is. Shops you've marked "wrong price" say why
   they're still listed and what to do.

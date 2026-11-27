@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Type the price yourself** for shops that block automatic checks (such as Currys): when a
+  link can't be read, PriceWatch offers a form for the price you see, optionally compared with a
+  product you already watch. Typed prices count in history, comparisons and alerts, are never
+  fetched automatically, and are updated with an **Update** box. Alternatives whose checks fail
+  link to the same form.
 - **Fix: wrong prices from add-ons.** An Amazon phone was recorded at £115.99 (the
   "1-year Accidental Damage insurance" offer) instead of £1,139.99. Extraction now skips
   insurance, protection plans, warranties, AppleCare, trade-in, delivery and monthly

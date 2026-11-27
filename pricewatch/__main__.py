@@ -307,7 +307,10 @@ def check_all(s, fair_check: bool = True) -> int:
         print(f"No database yet at {s.db_path}. Add products with: python3 -m pricewatch serve")
         return 1
     db = DB(s.db_path)
-    items = db.q("SELECT * FROM items ORDER BY IFNULL(parent_id, id), parent_id IS NOT NULL, id")
+    typed = db.one("SELECT COUNT(*) AS n FROM items WHERE manual=1")["n"]
+    items = db.q("SELECT * FROM items WHERE manual=0 ORDER BY IFNULL(parent_id, id), parent_id IS NOT NULL, id")
+    if typed:
+        print(f"Skipping {typed} price(s) you type in yourself (shops that block automatic checks).")
     if not items:
         print("Your database has no products yet. Add some with: python3 -m pricewatch serve")
         return 1

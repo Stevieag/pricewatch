@@ -60,6 +60,8 @@ def fetch_price(settings: Settings, url: str) -> tuple[Extracted, str]:
 
 
 def check_item(settings: Settings, db: DB, item) -> None:
+    if _is_manual(item):   # you type this price in; the shop blocks automatic checks
+        return
     try:
         ex, _ = fetch_price(settings, item["url"])
     except FetchError as e:
@@ -75,6 +77,10 @@ def check_item(settings: Settings, db: DB, item) -> None:
                     method=ex.method, in_stock=ex.in_stock)
     log.info("check %s: %s %s", item["id"], ex.price, ex.currency or "")
     _review_alternative(db, item, ex)
+
+
+def _is_manual(item) -> bool:
+    return "manual" in item.keys() and bool(item["manual"])
 
 
 HOLD_LOW, HOLD_HIGH = Decimal("0.6"), Decimal("2")
@@ -159,7 +165,7 @@ class Scheduler(threading.Thread):
         fh = self.s.fair_interval_hours
         if self.fair_runner and fh > 0 and now() - self._last_fair_sweep >= fh * 3600:
             self._last_fair_sweep = now()
-            for item in self.db.q("SELECT id FROM items WHERE parent_id IS NULL AND active=1"):
+            for item in self.db.q("SELECT id FROM items WHERE parent_id IS NULL AND active=1 AND manual=0"):
                 self.fair_runner(item["id"])
 
     def run(self):

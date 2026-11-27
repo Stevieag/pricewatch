@@ -127,3 +127,41 @@ class CLITests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RefreshCommand(unittest.TestCase):
+    """`pricewatch refresh`: restart, re-check, Fair Price, search, in one go."""
+
+    def test_refresh_runs_every_step_in_order(self):
+        from unittest import mock
+        calls = []
+        with mock.patch("pricewatch.service.stop_server", lambda s: calls.append("stop")), \
+             mock.patch("pricewatch.service.start", lambda s, open_browser=True: calls.append(("start", open_browser)) or 0), \
+             mock.patch("pricewatch.__main__.check_all", lambda s, fair_check=True, item_id=None: calls.append(("check", fair_check, item_id)) or 0), \
+             mock.patch("pricewatch.__main__.find_better", lambda s, item_id=None: calls.append(("search", item_id)) or 0), \
+             mock.patch("pricewatch.__main__.validate_settings", lambda s: []), \
+             contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(cli.main(["refresh", "49"]), 0)
+            self.assertEqual(calls, ["stop", ("start", False), ("check", True, 49), ("search", 49)])
+            calls.clear()
+            cli.main(["refresh", "--no-restart", "--no-fair", "--no-search"])
+            self.assertEqual(calls, [("check", False, None)])
+            calls.clear()
+            cli.main(["restart", "--no-browser"])
+            self.assertEqual(calls, ["stop", ("start", False)])
+
+    def test_check_all_one_product_and_its_shops(self):
+        import tempfile
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as d:
+            s = load_settings({"PW_DATA_DIR": d, "PW_BROWSER_FETCH": "never"})
+            db = DB(s.db_path)
+            a = db.add_item(url="https://a.example/p", title="A", price="1", currency="GBP", interval_minutes=60)
+            db.add_item(url="https://b.example/p", title="A elsewhere", price="1", currency="GBP",
+                        interval_minutes=60, parent_id=a)
+            db.add_item(url="https://c.example/p", title="C", price="1", currency="GBP", interval_minutes=60)
+            seen = []
+            with mock.patch("pricewatch.monitor.check_item", lambda s, db, it: seen.append(it["url"])), \
+                 contextlib.redirect_stdout(io.StringIO()):
+                cli.check_all(s, fair_check=False, item_id=a)
+            self.assertEqual(seen, ["https://a.example/p", "https://b.example/p"])

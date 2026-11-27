@@ -53,6 +53,9 @@ python3 -m pricewatch start        # starts SearXNG + Ollama (if used) + PriceWa
 | `python3 -m pricewatch status` | Shows what's running, plus whether start-at-login is on |
 | `python3 -m pricewatch stop` | Stops PriceWatch and the SearXNG container (no other containers are touched) |
 | `python3 -m pricewatch stop --all` | Also quits Ollama and Docker Desktop |
+| `python3 -m pricewatch restart` | Restarts PriceWatch (not SearXNG or Ollama), e.g. after updating the code |
+| `python3 -m pricewatch refresh` | After an update, in one go: restart, re-check every price and other shop, Fair Price, then search other shops. `refresh 49` does one product; `--no-search`, `--no-fair`, `--no-restart` skip steps |
+| `python3 -m pricewatch check-all [ID]` | Re-check every price now (or one product and its other shops), with Fair Price unless `--no-fair` |
 | `python3 -m pricewatch autostart on` | macOS: start everything when you log in, so the bookmarklet always works (`off` to undo) |
 | `python3 -m pricewatch serve` | Runs PriceWatch in the current window instead (Ctrl+C to stop) |
 

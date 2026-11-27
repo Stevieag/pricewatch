@@ -22,6 +22,14 @@ def main(argv=None) -> int:
     sub = ap.add_subparsers(dest="cmd")
     st = sub.add_parser("start", help="start everything (SearXNG, Ollama, PriceWatch) in the background")
     st.add_argument("--no-browser", action="store_true", help="don't open the browser")
+    rs = sub.add_parser("restart", help="stop and start PriceWatch (use after updating the code)")
+    rs.add_argument("--no-browser", action="store_true", help="don't open the browser")
+    rf = sub.add_parser("refresh", help="after an update: restart, re-check every price, Fair Price, "
+                                        "then search other shops")
+    rf.add_argument("id", nargs="?", type=int, help="one product id (default: everything)")
+    rf.add_argument("--no-restart", action="store_true", help="don't restart PriceWatch first")
+    rf.add_argument("--no-fair", action="store_true", help="skip the Fair Price check")
+    rf.add_argument("--no-search", action="store_true", help="skip searching other shops (much faster)")
     sp = sub.add_parser("stop", help="stop PriceWatch and SearXNG")
     sp.add_argument("--all", action="store_true", help="also quit Ollama and Docker Desktop")
     sub.add_parser("status", help="show what's running")
@@ -36,6 +44,7 @@ def main(argv=None) -> int:
     c.add_argument("--as", dest="persona", metavar="DEVICE",
                    help="visit as a Fair Price profile: android, iphone, windows, mac, linux")
     ca = sub.add_parser("check-all", help="re-check every product in your database now")
+    ca.add_argument("id", nargs="?", type=int, help="one product id and its other shops (default: all)")
     ca.add_argument("--no-fair", action="store_true", help="skip the Fair Price check (faster)")
     sub.add_parser("doctor", help="check the AI search setup (Ollama, SearXNG, browser)")
     fb = sub.add_parser("find-better", help="run the AI price search on your products")
@@ -79,6 +88,25 @@ def main(argv=None) -> int:
                           "found_in": ex.context, "in_stock": ex.in_stock}, indent=2, ensure_ascii=False))
         return 0
 
+    if args.cmd in ("restart", "refresh"):
+        from . import service
+        if not (args.cmd == "refresh" and args.no_restart):
+            print("Restarting PriceWatch so it runs the current code…")
+            service.stop_server(s)   # SearXNG and Ollama keep running
+            problems = validate_settings(s)
+            if problems:
+                for p in problems:
+                    print(f"[pricewatch] {p}", file=sys.stderr)
+                return 2
+            code = service.start(s, open_browser=args.cmd == "restart" and not args.no_browser)
+            if code or args.cmd == "restart":
+                return code
+        print()
+        code = check_all(s, fair_check=not args.no_fair, item_id=args.id)
+        if not args.no_search:
+            print("\nSearching other shops (your size/option is used at each shop)…\n")
+            code = find_better(s, args.id) or code
+        return code
     if args.cmd in ("start", "stop", "status", "autostart"):
         from . import service
         if args.cmd == "autostart":
@@ -97,7 +125,7 @@ def main(argv=None) -> int:
             return 2
         return service.start(s, open_browser=not args.no_browser)
     if args.cmd == "check-all":
-        return check_all(s, fair_check=not args.no_fair)
+        return check_all(s, fair_check=not args.no_fair, item_id=args.id)
     if args.cmd == "doctor":
         return doctor(s)
     if args.cmd == "find-better":
@@ -294,7 +322,7 @@ def find_better(s, item_id=None) -> int:
     return 0 if not failed else 1
 
 
-def check_all(s, fair_check: bool = True) -> int:
+def check_all(s, fair_check: bool = True, item_id=None) -> int:
     """Re-check every item (and every alternative) in the real database, then Fair Price."""
     import time
     from decimal import Decimal
@@ -309,6 +337,8 @@ def check_all(s, fair_check: bool = True) -> int:
     db = DB(s.db_path)
     typed = db.one("SELECT COUNT(*) AS n FROM items WHERE manual=1")["n"]
     items = db.q("SELECT * FROM items WHERE manual=0 ORDER BY IFNULL(parent_id, id), parent_id IS NOT NULL, id")
+    if item_id:
+        items = [i for i in items if item_id in (i["id"], i["parent_id"])]
     if typed:
         print(f"Skipping {typed} price(s) you type in yourself (shops that block automatic checks).")
     if not items:

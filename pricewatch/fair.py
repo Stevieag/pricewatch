@@ -43,6 +43,7 @@ from .config import Settings
 from .db import DB, now
 from .extract import extract
 from .fetcher import FetchError, browser_get, find_browser, safe_get
+from .monitor import _shopify_variant
 from .extract import RELIABLE_METHODS
 from .util import fmt_price
 
@@ -92,7 +93,7 @@ def run_personas(s: Settings, db: DB, item_id: int) -> int:
             else:
                 text = safe_get(item["url"], user_agent=p["ua"], timeout=s.fetch_timeout,
                                 allow_private=s.allow_private_hosts, accept_language=p["lang"]).text
-            ex = extract(text)
+            ex = _shopify_variant(s, item["url"], text, extract(text))   # the linked size/option
             price, cur, method, ctx = ex.price, ex.currency, ex.method, ex.context
             err = None if price is not None else "no price found"
         except FetchError as e:
@@ -114,8 +115,9 @@ def run_personas(s: Settings, db: DB, item_id: int) -> int:
                 time.sleep(BROWSER_SPACING_SECONDS)
             price = cur = err = method = ctx = None
             try:
-                ex = extract(browser_get(item["url"], browser=browser, user_agent=s.user_agent,
-                                         allow_private=s.allow_private_hosts, accept_language=lang[1]).text)
+                html = browser_get(item["url"], browser=browser, user_agent=s.user_agent,
+                                   allow_private=s.allow_private_hosts, accept_language=lang[1]).text
+                ex = _shopify_variant(s, item["url"], html, extract(html))
                 price, cur, method, ctx = ex.price, ex.currency, ex.method + "+browser", ex.context
                 err = None if price is not None else "no price found"
             except FetchError as e:
@@ -186,6 +188,9 @@ def report(s: Settings, db: DB, item_id: int) -> FairReport:
     cur = item["currency"]
     rows = db.q("SELECT * FROM fair_checks WHERE item_id=? ORDER BY checked_at DESC", (item_id,))
     anon = [r for r in rows if r["persona"] != "you"]
+    if any((r["method"] or "").startswith("shopify") for r in anon):
+        # earlier checks of this Shopify link read the shop's lowest size/option, not yours
+        anon = [r for r in anon if r["price"] is None or (r["method"] or "").startswith("shopify")]
     last_run = anon[0]["checked_at"] if anon else None
     latest_rows = [r for r in anon if r["checked_at"] == last_run] if last_run else []
     same_cur = lambda r: r["price"] is not None and (not cur or not r["currency"] or r["currency"] == cur)  # noqa

@@ -318,6 +318,7 @@ class PriceAgent:
         check (e.g. it looks like a monthly or deposit price) or None if it looks fine.
         The user's own feedback about this shop is passed to the model as advice."""
         doubt = price_doubt(cand.price, orig_price, cand.method)
+        name_ok = names_agree(original, cand.title)
         code = shares_model_code(self.known_codes, model_codes(cand.title)) if self.known_codes else None
         if code:  # same manufacturer model number: same product, whatever a small model thinks
             return True, doubt
@@ -345,11 +346,13 @@ class PriceAgent:
                     raise AgentError("the model's answer wasn't true/false")
                 if not full:
                     doubt = "the AI thinks this may not be the full price (monthly/deposit?)"
-                # the model can be talked round by text on the page: when the names barely match,
-                # add it for your check rather than trusting the model alone
-                if same and not names_agree(original, cand.title):
+                elif doubt:
+                    # deterministic guard: don't allow model output to clear a pre-existing price doubt
+                    full = False
+                # deterministic same-product gate: never accept LLM-only "same" when names don't agree
+                if same and not name_ok:
                     return False, "the AI says it's the same product, but the names differ a lot"
-                return same, doubt
+                return (same and name_ok), doubt
             except AgentError as e:
                 log.info("LLM match failed, using heuristic: %s", e)
         return heuristic_same_product(original, cand.title), doubt

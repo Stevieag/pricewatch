@@ -210,9 +210,53 @@ def _jsonld_offers(html: str) -> list[dict]:
     return out
 
 
+def _woo_selected(settings: Settings, url: str, html: str, ex: Extracted):
+    """A WooCommerce link that names its options (?attribute_size=…&attribute_depth=…, as the
+    bookmarklet sends them): that exact combination's price, from the page or, when the shop
+    loads options separately, from WooCommerce's own price lookup (?wc-ajax=get_variation)."""
+    from urllib.parse import parse_qsl
+    p = urlsplit(url)
+    attrs = {k: v for k, v in parse_qsl(p.query) if k.startswith("attribute_") and v}
+    if not attrs or "variations_form" not in html:
+        return None
+    label = " / ".join(attrs.values())
+    data = None
+    for v in _woo_variations(html):   # embedded: match every attribute (blank = "any")
+        if all(str(v["attributes"].get(k) or val).lower() == val.lower() for k, val in attrs.items()):
+            data = v
+            break
+    if data is None and _woo_options_elsewhere(html):
+        m = re.search(r'variations_form[^>]*data-product_id="(\d+)"|data-product_id="(\d+)"[^>]*variations_form', html)
+        if m:
+            try:
+                res = safe_get(urlunsplit((p.scheme, p.netloc, "/", "wc-ajax=get_variation", "")),
+                               user_agent=settings.user_agent, timeout=settings.fetch_timeout,
+                               allow_private=settings.allow_private_hosts,
+                               form={**attrs, "product_id": m.group(1) or m.group(2)})
+                got = json.loads(res.text)
+                data = got if isinstance(got, dict) else None
+            except (FetchError, ValueError):
+                data = None
+    if not data:
+        return Extracted(title=ex.title, price=None, currency=ex.currency, method="none",
+                         context=f"the shop has no '{label}' option now"), url
+    try:
+        price = Decimal(str(data.get("display_price"))).quantize(Decimal("0.01"))
+    except (ArithmeticError, ValueError):
+        return None
+    title = ex.title if not ex.title or label in ex.title else f"{ex.title} ({label})"
+    stock = data.get("is_in_stock")
+    return Extracted(title=title, price=price, currency=ex.currency, method="woocommerce",
+                     in_stock=stock if isinstance(stock, bool) else ex.in_stock,
+                     context=f"option matched to your choice: {label}"[:200]), url
+
+
 def _options(settings: Settings, url: str, html: str, ex: Extracted, hint: str | None):
     """Pick the product option (size, frame, colour…) the link or your choice means, and
     return (extracted, url_of_that_option). Shopify and WooCommerce shops."""
+    picked = _woo_selected(settings, url, html, ex)
+    if picked:
+        return picked
     if not hint:
         return _shopify_variant(settings, url, html, ex), url
     p = urlsplit(url)

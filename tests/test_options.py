@@ -71,6 +71,9 @@ STANDART = ('<title>Dorema Monza XL300 | FREE 28mm Frame Upgrade | 300cm Depth</
             '<select name="attribute_pa_frame_options"><option value=""></option>'
             '<option value="25mm-easygrip-steel">25</option><option value="28mm-easygrip-steel">28</option>'
             '<option value="fibretech-plus">fibre</option></select></form>')
+STANDART_FREE = STANDART.replace('</form>', '</form><div class="woobt-product woobt-product-together" data-id="9" '
+                                 'data-name="FREE 28mm Steel Frame Upgrade with Dorema Monza Awning Range" '
+                                 'data-new-price="100%" data-price="0" data-regular-price="0"></div>')
 NO_SIZE = SHOPIFY.replace('"Size 15 (1000-1025) / Steel 28mm"', '"Size 14 (975-1000) / Steel 28mm"')
 
 
@@ -86,7 +89,7 @@ class Shop(BaseHTTPRequestHandler):
         Shop.lookups.append(form)
         prices = {("77", "G19/1015 (1001-1025cm)", "300cm"): 2239, ("77", "G19/1015 (1001-1025cm)", "250cm"): 1999,
                   ("88", "size-15-1000-1025-cm", "28mm-easygrip-steel"): 2069,
-                  ("88", "size-15-1000-1025-cm", "25mm-easygrip-steel"): 1979}
+                  ("88", "size-15-1000-1025-cm", "25mm-easygrip-steel"): 1939}
         price = prices.get((form.get("product_id"),
                             form.get("attribute_size") or form.get("attribute_pa_monza-xl300"),
                             form.get("attribute_depth") or form.get("attribute_pa_frame_options")))
@@ -95,7 +98,7 @@ class Shop(BaseHTTPRequestHandler):
         self.wfile.write(b)
 
     def do_GET(self):
-        body = {"/products/monza": SHOPIFY, "/product/monza-xl300/": WOO, "/products/small": NO_SIZE, "/product/standart-monza/": STANDART, "/product/co-monza/": CAMPING_ONLINE, "/product/ventura-pacific/": GRANTHAM, "/product/ajax/": WOO_AJAX, "/dometic-stuga-rest-full-awning": MAGENTO,
+        body = {"/products/monza": SHOPIFY, "/product/monza-xl300/": WOO, "/products/small": NO_SIZE, "/product/standart-monza/": STANDART, "/product/standart-free/": STANDART_FREE, "/product/co-monza/": CAMPING_ONLINE, "/product/ventura-pacific/": GRANTHAM, "/product/ajax/": WOO_AJAX, "/dometic-stuga-rest-full-awning": MAGENTO,
                 "/products/monza.js": None}.get(self.path.split("?")[0])
         if body is None:
             self.send_response(404); self.end_headers(); return
@@ -183,6 +186,14 @@ class YourOptionEverywhere(unittest.TestCase):
         self.assertIn("attribute_pa_frame_options=28mm-easygrip-steel", url)   # re-checks ask the same
         self.assertIn("size-15-1000-1025-cm", url)
         self.assertEqual(fetch_price(self.s, url)[0].price, Decimal("2069.00"))
+
+    def test_free_frame_upgrade_prices_the_base_frame(self):   # Standart: 28 mm free → £1,939
+        ex, url = fetch_price(self.s, self.base + "/product/standart-free/", HINT)
+        self.assertEqual((ex.price, ex.method), (Decimal("1939.00"), "woocommerce"))
+        self.assertIn("attribute_pa_frame_options=25mm-easygrip-steel", url)
+        self.assertIn("FREE 28mm Steel Frame Upgrade", ex.context)
+        ex, _ = fetch_price(self.s, self.base + "/product/standart-free/", "15 (1000-1025) / Mega")
+        self.assertIsNone(ex.price)                     # a free 28 mm steel upgrade is not Megaframe
 
     def test_shop_without_your_option_reports_no_price(self):
         ex, _ = fetch_price(self.s, self.base + "/products/small", HINT)

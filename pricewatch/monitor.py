@@ -244,6 +244,22 @@ def _woo_selects(html: str) -> dict[str, list[str]]:
     return out
 
 
+_FREE_ITEM = re.compile(r'data-name="([^"]*\bfree\b[^"]*)"[^>]*data-price="0(?:\.0+)?"', re.I)
+
+
+def _free_frame_upgrade(html: str, want: set[str]) -> str | None:
+    """A free add-on that gives you your frame, e.g. Standart Caravans' "FREE 28mm Steel Frame
+    Upgrade" bundled at £0 (WPC "bought together" item): its name, else None."""
+    if not {w for w in want if w.isdigit()}:
+        return None
+    for m in _FREE_ITEM.finditer(html):
+        name = m.group(1)
+        got = _words(name) & _FRAME_WORDS
+        if "upgrade" in name.lower() and got and _same_frame(want, got):
+            return name
+    return None
+
+
 def _pick_woo_options(html: str, hint: str, title: str | None) -> dict[str, str] | None:
     """Your size and frame from each WooCommerce option list; None if a list that decides the
     size or frame has nothing that is yours."""
@@ -257,6 +273,8 @@ def _pick_woo_options(html: str, hint: str, title: str | None) -> dict[str, str]
             mine = [v for v in sized if _option_score(hint, _RANGE.search(v).group(0)) is not None]
         elif framed:
             mine = [v for v in framed if want and _same_frame(want, _words(v) & _FRAME_WORDS)]
+            if mine and _free_frame_upgrade(html, want):   # your frame comes free: pay for the base one
+                mine = framed[:1]
         else:   # colour, depth…: the one your product names, else the first
             mine = [v for v in values if _words(v) and _words(v) <= other] or values[:1]
         if not mine:
@@ -304,6 +322,9 @@ def _woo_selected(settings: Settings, url: str, html: str, ex: Extracted, hint: 
         price = Decimal(str(data.get("display_price"))).quantize(Decimal("0.01"))
     except (ArithmeticError, ValueError):
         return None
+    free = _free_frame_upgrade(html, _words(_RANGE.sub(" ", hint)) & _FRAME_WORDS) if hint else None
+    if free:
+        label = f"{label} + {free.strip()}"
     title = ex.title if not ex.title or label in ex.title else f"{ex.title} ({label})"
     stock = data.get("is_in_stock")
     return Extracted(title=title, price=price, currency=ex.currency, method="woocommerce",

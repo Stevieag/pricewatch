@@ -6,6 +6,9 @@
   searching and re-checking (options picked from the shop's lists, then the shop's own lookup):
   Standart Caravans' Monza XL300 reads £2,069 for size 15 / 28 mm, not its £1,699 default.
   "28mm EasyGrip Steel" counts as a 28 mm steel frame (EasyGrip is Dorema's clamp name).
+- A free frame upgrade bundled on the page (a £0 "FREE 28mm Steel Frame Upgrade" item) is
+  now taken into account: PriceWatch prices the base frame and notes the free upgrade, so
+  Standart Caravans reads £1,939 for size 15 with 28 mm steel, not £2,069.
 - **WooCommerce options you select are kept.** The bookmarklet adds your selected options
   (e.g. size G19/1015, depth 300cm) to the link and captures the shown price; PriceWatch then
   prices that exact combination, from the page or WooCommerce's own lookup

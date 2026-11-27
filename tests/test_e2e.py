@@ -240,3 +240,11 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class BookmarkletNewTab(unittest.TestCase):
+    def test_opens_a_new_tab_and_keeps_the_shop_page(self):
+        from pricewatch.web import BOOKMARKLET_JS
+        self.assertIn("window.open(u,'_blank')", BOOKMARKLET_JS)
+        self.assertIn("location.href=u", BOOKMARKLET_JS)       # fallback if pop-ups are blocked
+        self.assertNotIn("noopener", BOOKMARKLET_JS)            # would make window.open return null

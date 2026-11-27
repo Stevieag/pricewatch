@@ -29,6 +29,7 @@ from urllib.parse import parse_qs, urlencode, urlsplit
 
 from . import __version__, chart, fair
 from .agent import PriceAgent
+from .extract import RELIABLE_METHODS
 from .config import Settings
 from .db import DB, now
 from .fetcher import FetchError
@@ -573,10 +574,11 @@ def render_fair(app: App, it) -> str:
     def evidence(method, ctx):
         if not method:
             return ""
-        sure = method.split("+")[0] in ("jsonld", "microdata", "meta")
+        base = method.split("+")[0]
+        sure = base in RELIABLE_METHODS
         tag = ('<span class="badge good">shop data</span>' if sure
                else '<span class="badge warn" title="Read from the page text; could be used, another seller or edition">page text</span>')
-        return f'{tag}<div class="evidence">{e(ctx)}</div>' if ctx and not sure else tag
+        return f'{tag}<div class="evidence">{e(ctx)}</div>' if ctx and (not sure or base == "shopify") else tag
     rows = "".join(f"<tr><td>{e(label)}</td><td class='num'>{e(fmt_price(p, cur)) if p is not None else ''}</td>"
                    f"<td class='muted'>{evidence(meth, ctx) if p is not None else e(err or '')}</td></tr>"
                    for label, p, err, meth, ctx in r.latest)
@@ -601,7 +603,10 @@ def render_fair(app: App, it) -> str:
 # Runs in YOUR browser on the shop page: reads the price you are being shown and
 # sends only {url, price} to your local PriceWatch. No cookies leave the page.
 BOOKMARKLET_JS = (
-    "(()=>{let p='';const f=o=>{if(!o||p)return;if(Array.isArray(o))return o.forEach(f);"
+    "(()=>{let p='';try{const m=window.ShopifyAnalytics&&ShopifyAnalytics.meta,"
+    "vid=new URLSearchParams(location.search).get('variant')||(m&&m.selectedVariantId),"
+    "v=m&&m.product&&m.product.variants.find(x=>String(x.id)===String(vid));"
+    "if(v&&v.price)p=(v.price/100).toFixed(2)}catch(e){}const f=o=>{if(!o||p)return;if(Array.isArray(o))return o.forEach(f);"
     "if(typeof o!=='object')return;const of=o.offers;if(of){const x=Array.isArray(of)?of[0]:of;"
     "p=(x&&(x.price||x.lowPrice))||''}if(!p&&o.price)p=o.price;f(o['@graph']);f(o.mainEntity)};"
     "document.querySelectorAll('script[type=\"application/ld+json\"]').forEach(s=>{try{f(JSON.parse(s.textContent))}catch(e){}});"

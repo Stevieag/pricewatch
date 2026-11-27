@@ -44,15 +44,46 @@ MAGENTO = ('<title>Dometic Stuga Rest (Poled) Full Awning 2026</title><script ty
                               "sku": f"ATTE2023-Size {9 + i} ({840 + 25 * i}-{865 + 25 * i}cm)"}
                              for i in range(11)]}}) + "</script>")
 WOO_AJAX = WOO.replace(html.escape(json.dumps(WOO_VARS)), "false")
+GRANTHAM = ('<title>Isabella - Ventura Pacific Full Awning</title>'
+            '<script type="application/ld+json">{"@type":"Product","name":"Ventura Pacific","offers":'
+            '{"lowPrice":"1645.00","price":"1645.00","priceCurrency":"GBP"}}</script>'
+            '<form class="variations_form cart" data-product_id="77" data-product_variations="false">'
+            '<select name="attribute_size"><option value="G19/1015 (1001-1025cm)">G19</option></select>'
+            '<select name="attribute_depth"><option value="250cm">250</option><option value="300cm">300</option></select>'
+            '</form>')
+CAMPING_ONLINE = ('<title>Dorema Monza XL300 Touring Seasonal Awning 28mm Steel Frame</title>'
+                  '<script type="application/ld+json">{"@type":"Product","name":"Dorema Monza XL300 Touring '
+                  'Seasonal Awning 28mm Steel Frame","offers":{"price":"1479.00","priceCurrency":"GBP"}}</script>'
+                  '<form class="cart"><select name="wapf[field_1]"><option value="">Choose an option</option>'
+                  '<option value="a" data-wapf-label="size 5-750-775" data-wapf-pricetype="fixed">size 5-750-775</option>'
+                  '<option value="b" data-wapf-label="size 14-975-1000" data-wapf-pricetype="fixed" data-wapf-price="410">'
+                  'size 14-975-1000 <span class="wapf-pricing-hint">(+&pound;410.00)</span></option>'
+                  '<option value="c" data-wapf-label="size 15-1000-1025" data-wapf-pricetype="fixed" data-wapf-price="500">'
+                  'size 15-1000-1025 <span class="wapf-pricing-hint">(+&pound;500.00)</span></option></select>'
+                  '<select name="wapf[field_2]"><option data-wapf-label="No">No</option>'
+                  '<option data-wapf-label="Yes" data-wapf-price="589">Yes (+£589.00)</option></select></form>')
 NO_SIZE = SHOPIFY.replace('"Size 15 (1000-1025) / Steel 28mm"', '"Size 14 (975-1000) / Steel 28mm"')
 
 
 class Shop(BaseHTTPRequestHandler):
+    lookups = []
+
     def log_message(self, *a):
         pass
 
+    def do_POST(self):   # WooCommerce's ?wc-ajax=get_variation
+        from urllib.parse import parse_qs
+        form = {k: v[0] for k, v in parse_qs(self.rfile.read(int(self.headers["Content-Length"])).decode()).items()}
+        Shop.lookups.append(form)
+        prices = {("G19/1015 (1001-1025cm)", "300cm"): 2239, ("G19/1015 (1001-1025cm)", "250cm"): 1999}
+        price = prices.get((form.get("attribute_size"), form.get("attribute_depth")))
+        b = json.dumps({"display_price": price, "is_in_stock": True} if price and form.get("product_id") == "77"
+                       else False).encode()
+        self.send_response(200); self.send_header("Content-Length", str(len(b))); self.end_headers()
+        self.wfile.write(b)
+
     def do_GET(self):
-        body = {"/products/monza": SHOPIFY, "/product/monza-xl300/": WOO, "/products/small": NO_SIZE, "/product/ajax/": WOO_AJAX, "/dometic-stuga-rest-full-awning": MAGENTO,
+        body = {"/products/monza": SHOPIFY, "/product/monza-xl300/": WOO, "/products/small": NO_SIZE, "/product/co-monza/": CAMPING_ONLINE, "/product/ventura-pacific/": GRANTHAM, "/product/ajax/": WOO_AJAX, "/dometic-stuga-rest-full-awning": MAGENTO,
                 "/products/monza.js": None}.get(self.path.split("?")[0])
         if body is None:
             self.send_response(404); self.end_headers(); return
@@ -113,6 +144,26 @@ class YourOptionEverywhere(unittest.TestCase):
         self.assertEqual(_option_score(mega, "1015 (1001-1025cm) / Steel Megaframe"), 2)
         self.assertIsNone(_option_score(HINT, "15 (1000-1025) / Steel EasyGrip"))
         self.assertEqual(_option_score(HINT, "Size 15 / 28mm Frame"), 2)
+
+    def test_woocommerce_link_with_your_options(self):   # Grantham read £1,645 (cheapest), not £2,239
+        from urllib.parse import urlencode
+        url = (self.base + "/product/ventura-pacific/?" +
+               urlencode({"attribute_size": "G19/1015 (1001-1025cm)", "attribute_depth": "300cm"}))
+        ex, final = fetch_price(self.s, url)
+        self.assertEqual((ex.price, ex.method), (Decimal("2239.00"), "woocommerce"))
+        self.assertEqual(Shop.lookups[-1]["product_id"], "77")
+        self.assertIn("G19/1015 (1001-1025cm) / 300cm", ex.title)
+        self.assertEqual(final, url)
+        gone = url.replace("300cm", "400cm")
+        self.assertIsNone(fetch_price(self.s, gone)[0].price)   # option no longer sold: no guess
+
+    def test_size_sold_as_a_paid_extra(self):   # Camping Online showed £1,479 (size 5) as "£500 cheaper"
+        ex, _ = fetch_price(self.s, self.base + "/product/co-monza/", HINT)
+        self.assertEqual((ex.price, ex.method), (Decimal("1979.00"), "jsonld"))
+        self.assertIn("size 15-1000-1025", ex.title)
+        self.assertIn("1479.00 + extras 500.00", ex.context)
+        ex, _ = fetch_price(self.s, self.base + "/product/co-monza/", "19 (1100-1125) / Steel 28 mm")
+        self.assertIsNone(ex.price)                          # size not offered: no guess
 
     def test_shop_without_your_option_reports_no_price(self):
         ex, _ = fetch_price(self.s, self.base + "/products/small", HINT)

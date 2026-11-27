@@ -167,6 +167,26 @@ def _addon_lines(html: str) -> list[tuple[str, int, int, Decimal]]:
     return out
 
 
+def _paid_options(html: str) -> list[tuple[str, Decimal]]:
+    """Options a shop prices as extras on top of the base price, e.g. Camping Online's
+    <option data-wapf-label="size 15-1000-1025" data-wapf-price="500"> or any
+    <option>size 15 (+£500.00)</option>. An option with no price adds nothing."""
+    import html as _h
+    out = []
+    for m in re.finditer(r"<option\b([^>]*)>(.*?)</option>", html[:2_000_000], re.S | re.I):
+        attrs, inner = m.group(1), _h.unescape(re.sub(r"<[^>]+>", " ", m.group(2)))
+        lab = re.search(r'data-wapf-label="([^"]*)"', attrs)
+        label = _h.unescape(lab.group(1)) if lab else re.sub(r"\(\+\s*£[^)]*\)", "", inner)
+        price = re.search(r'data-wapf-price="([\d.]+)"', attrs) or re.search(r"\(\+\s*£\s*([\d,]+(?:\.\d{1,2})?)\)", inner)
+        if not (lab or price):
+            continue
+        try:
+            out.append((" ".join(label.split()), Decimal(price.group(1).replace(",", "")) if price else Decimal(0)))
+        except ArithmeticError:
+            pass
+    return out
+
+
 def _frame_addon(html: str, hint: str) -> tuple[str, Decimal] | None:
     size = re.match(r"\s*(\d{1,2})\b", hint)
     want = _words(_RANGE.sub(" ", hint)) & _FRAME_WORDS
@@ -210,9 +230,53 @@ def _jsonld_offers(html: str) -> list[dict]:
     return out
 
 
+def _woo_selected(settings: Settings, url: str, html: str, ex: Extracted):
+    """A WooCommerce link that names its options (?attribute_size=…&attribute_depth=…, as the
+    bookmarklet sends them): that exact combination's price, from the page or, when the shop
+    loads options separately, from WooCommerce's own price lookup (?wc-ajax=get_variation)."""
+    from urllib.parse import parse_qsl
+    p = urlsplit(url)
+    attrs = {k: v for k, v in parse_qsl(p.query) if k.startswith("attribute_") and v}
+    if not attrs or "variations_form" not in html:
+        return None
+    label = " / ".join(attrs.values())
+    data = None
+    for v in _woo_variations(html):   # embedded: match every attribute (blank = "any")
+        if all(str(v["attributes"].get(k) or val).lower() == val.lower() for k, val in attrs.items()):
+            data = v
+            break
+    if data is None and _woo_options_elsewhere(html):
+        m = re.search(r'variations_form[^>]*data-product_id="(\d+)"|data-product_id="(\d+)"[^>]*variations_form', html)
+        if m:
+            try:
+                res = safe_get(urlunsplit((p.scheme, p.netloc, "/", "wc-ajax=get_variation", "")),
+                               user_agent=settings.user_agent, timeout=settings.fetch_timeout,
+                               allow_private=settings.allow_private_hosts,
+                               form={**attrs, "product_id": m.group(1) or m.group(2)})
+                got = json.loads(res.text)
+                data = got if isinstance(got, dict) else None
+            except (FetchError, ValueError):
+                data = None
+    if not data:
+        return Extracted(title=ex.title, price=None, currency=ex.currency, method="none",
+                         context=f"the shop has no '{label}' option now"), url
+    try:
+        price = Decimal(str(data.get("display_price"))).quantize(Decimal("0.01"))
+    except (ArithmeticError, ValueError):
+        return None
+    title = ex.title if not ex.title or label in ex.title else f"{ex.title} ({label})"
+    stock = data.get("is_in_stock")
+    return Extracted(title=title, price=price, currency=ex.currency, method="woocommerce",
+                     in_stock=stock if isinstance(stock, bool) else ex.in_stock,
+                     context=f"option matched to your choice: {label}"[:200]), url
+
+
 def _options(settings: Settings, url: str, html: str, ex: Extracted, hint: str | None):
     """Pick the product option (size, frame, colour…) the link or your choice means, and
     return (extracted, url_of_that_option). Shopify and WooCommerce shops."""
+    picked = _woo_selected(settings, url, html, ex)
+    if picked:
+        return picked
     if not hint:
         return _shopify_variant(settings, url, html, ex), url
     p = urlsplit(url)
@@ -276,6 +340,26 @@ def _options(settings: Settings, url: str, html: str, ex: Extracted, hint: str |
         u = o["url"] if isinstance(o["url"], str) and o["url"].startswith(("http://", "https://")) else url
         cand = (score, price.quantize(Decimal("0.01")), label.strip()[:80], u, o["in_stock"], "jsonld")
         best = cand if best is None or cand[0] > best[0] else best
+    sizes = [(l, p) for l, p in _paid_options(html) if _RANGE.search(l)] if best is None else []
+    if sizes and ex.price and _RANGE.search(hint):
+        # the size is a paid extra on a fixed base price (Camping Online: £1,479 + £500)
+        mine = [(l, p) for l, p in sizes if _option_score(hint, l) is not None]
+        if not mine:
+            return Extracted(title=ex.title, price=None, currency=ex.currency, method="none",
+                             context=f"no '{hint}' option on this page"), url
+        label, extra = mine[0]
+        total, parts = ex.price + extra, [label]
+        want = _words(_RANGE.sub(" ", hint)) & _FRAME_WORDS
+        frame = _frame_addon(html, hint) if want and not (want <= _words(ex.title or "")) else None
+        if frame:
+            total += frame[1]
+            parts.append(frame[0])
+        label = " + ".join(parts)
+        title = ex.title if not ex.title or label in ex.title else f"{ex.title} ({label})"
+        return Extracted(title=title, price=total.quantize(Decimal("0.01")), currency=ex.currency,
+                         method=ex.method, in_stock=ex.in_stock,
+                         context=f"option matched to your choice: {label} "
+                                 f"({ex.price} + extras {(total - ex.price).quantize(Decimal('0.01'))})"[:200]), url
     if best is None and _woo_options_elsewhere(html):
         return Extracted(title=ex.title, price=None, currency=ex.currency, method="none",
                          context=f"no '{hint}' option on this page (this shop loads its options "

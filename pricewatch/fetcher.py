@@ -70,14 +70,18 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 
 
 def safe_get(url: str, *, user_agent: str, timeout: int = 20,
-             allow_private: bool = False, accept_language: str = "en-GB,en;q=0.9") -> FetchResult:
+             allow_private: bool = False, accept_language: str = "en-GB,en;q=0.9",
+             form: dict | None = None) -> FetchResult:
+    """GET a page (or POST `form`, for a shop's own price lookup), with the SSRF guard on every
+    hop. A POST is never re-sent to a redirect target."""
     opener = urllib.request.build_opener(
         _NoRedirect, urllib.request.HTTPSHandler(context=ssl.create_default_context())
     )
     current = url
     for _ in range(MAX_REDIRECTS + 1):
         check_url_allowed(current, allow_private)
-        req = urllib.request.Request(current, headers={
+        data = urllib.parse.urlencode(form).encode() if form is not None else None
+        req = urllib.request.Request(current, data=data, headers={
             "User-Agent": user_agent,
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
             "Upgrade-Insecure-Requests": "1",
@@ -86,7 +90,7 @@ def safe_get(url: str, *, user_agent: str, timeout: int = 20,
         try:
             resp = opener.open(req, timeout=timeout)
         except urllib.error.HTTPError as e:
-            if e.code in (301, 302, 303, 307, 308) and e.headers.get("Location"):
+            if e.code in (301, 302, 303, 307, 308) and e.headers.get("Location") and form is None:
                 current = urllib.parse.urljoin(current, e.headers["Location"])
                 continue
             host = urlsplit(current).hostname

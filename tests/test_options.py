@@ -51,6 +51,17 @@ GRANTHAM = ('<title>Isabella - Ventura Pacific Full Awning</title>'
             '<select name="attribute_size"><option value="G19/1015 (1001-1025cm)">G19</option></select>'
             '<select name="attribute_depth"><option value="250cm">250</option><option value="300cm">300</option></select>'
             '</form>')
+CAMPING_ONLINE = ('<title>Dorema Monza XL300 Touring Seasonal Awning 28mm Steel Frame</title>'
+                  '<script type="application/ld+json">{"@type":"Product","name":"Dorema Monza XL300 Touring '
+                  'Seasonal Awning 28mm Steel Frame","offers":{"price":"1479.00","priceCurrency":"GBP"}}</script>'
+                  '<form class="cart"><select name="wapf[field_1]"><option value="">Choose an option</option>'
+                  '<option value="a" data-wapf-label="size 5-750-775" data-wapf-pricetype="fixed">size 5-750-775</option>'
+                  '<option value="b" data-wapf-label="size 14-975-1000" data-wapf-pricetype="fixed" data-wapf-price="410">'
+                  'size 14-975-1000 <span class="wapf-pricing-hint">(+&pound;410.00)</span></option>'
+                  '<option value="c" data-wapf-label="size 15-1000-1025" data-wapf-pricetype="fixed" data-wapf-price="500">'
+                  'size 15-1000-1025 <span class="wapf-pricing-hint">(+&pound;500.00)</span></option></select>'
+                  '<select name="wapf[field_2]"><option data-wapf-label="No">No</option>'
+                  '<option data-wapf-label="Yes" data-wapf-price="589">Yes (+£589.00)</option></select></form>')
 NO_SIZE = SHOPIFY.replace('"Size 15 (1000-1025) / Steel 28mm"', '"Size 14 (975-1000) / Steel 28mm"')
 
 
@@ -72,7 +83,7 @@ class Shop(BaseHTTPRequestHandler):
         self.wfile.write(b)
 
     def do_GET(self):
-        body = {"/products/monza": SHOPIFY, "/product/monza-xl300/": WOO, "/products/small": NO_SIZE, "/product/ventura-pacific/": GRANTHAM, "/product/ajax/": WOO_AJAX, "/dometic-stuga-rest-full-awning": MAGENTO,
+        body = {"/products/monza": SHOPIFY, "/product/monza-xl300/": WOO, "/products/small": NO_SIZE, "/product/co-monza/": CAMPING_ONLINE, "/product/ventura-pacific/": GRANTHAM, "/product/ajax/": WOO_AJAX, "/dometic-stuga-rest-full-awning": MAGENTO,
                 "/products/monza.js": None}.get(self.path.split("?")[0])
         if body is None:
             self.send_response(404); self.end_headers(); return
@@ -145,6 +156,14 @@ class YourOptionEverywhere(unittest.TestCase):
         self.assertEqual(final, url)
         gone = url.replace("300cm", "400cm")
         self.assertIsNone(fetch_price(self.s, gone)[0].price)   # option no longer sold: no guess
+
+    def test_size_sold_as_a_paid_extra(self):   # Camping Online showed £1,479 (size 5) as "£500 cheaper"
+        ex, _ = fetch_price(self.s, self.base + "/product/co-monza/", HINT)
+        self.assertEqual((ex.price, ex.method), (Decimal("1979.00"), "jsonld"))
+        self.assertIn("size 15-1000-1025", ex.title)
+        self.assertIn("1479.00 + extras 500.00", ex.context)
+        ex, _ = fetch_price(self.s, self.base + "/product/co-monza/", "19 (1100-1125) / Steel 28 mm")
+        self.assertIsNone(ex.price)                          # size not offered: no guess
 
     def test_shop_without_your_option_reports_no_price(self):
         ex, _ = fetch_price(self.s, self.base + "/products/small", HINT)

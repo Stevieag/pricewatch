@@ -7,6 +7,9 @@
   prices that exact combination, from the page or WooCommerce's own lookup
   (`?wc-ajax=get_variation`) when the shop loads options separately. Grantham's Isabella Ventura
   Pacific read as £1,645 (cheapest) is now £2,239. Re-drag the bookmarklet to update it.
+- Shops that sell the size as a paid extra on a fixed base price (e.g. Camping Online, WAPF
+  add-ons: £1,479 + "size 15-1000-1025 (+£500)") now report the total for your size, £1,979,
+  instead of the base price.
 - `pricewatch start` starts PriceWatch first, then SearXNG/Docker and Ollama, so prices are
   available at once even when Docker Desktop is slow or crashes (only the shop search needs it).
 - Fix: "Steel Megaframe" matched a shop's plain "Steel" option (an Isabella Commodore read as

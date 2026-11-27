@@ -109,10 +109,12 @@ class YourOptionEverywhere(unittest.TestCase):
         db = DB(self.s.db_path)
         top = db.add_item(url="https://www.glossopawnings.com/products/x?variant=9", title=MINE,
                           price="1979.00", currency="GBP", interval_minutes=1440)
-        alt = db.add_item(url=self.base + "/product/monza-xl300/", title="Monza XL300", price="1459.00",
+        alt = db.add_item(url=self.base + "/product/monza-xl300/", title="Monza XL300 (5 (750-775cm))", price="1459.00",
                           currency="GBP", interval_minutes=1440, parent_id=top, source="agent")
         check_item(self.s, db, db.get_item(alt))
         self.assertEqual(db.get_item(alt)["current_price"], "2069.00")
+        self.assertNotIn("750-775", db.get_item(alt)["title"])
+        self.assertIn("28mm Frame", db.get_item(alt)["title"])
 
 
 if __name__ == "__main__":

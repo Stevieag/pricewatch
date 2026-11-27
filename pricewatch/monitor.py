@@ -223,10 +223,17 @@ def _jsonld_offers(html: str) -> list[dict]:
                 continue
             if not isinstance(o, dict):
                 continue
-            stack.extend(x for k in ("@graph", "offers", "hasVariant") for x in
-                         ((o.get(k) if isinstance(o.get(k), list) else [o.get(k)]) if o.get(k) else []))
+            # a variant (ProductGroup → hasVariant, e.g. Awning Ace) names its size; its offer
+            # only has the price, so the offer inherits the variant's size as its label
+            size = o.get("size") if isinstance(o.get("size"), str) else ""
+            for k in ("@graph", "offers", "hasVariant"):
+                kids = o.get(k) if isinstance(o.get(k), list) else ([o.get(k)] if o.get(k) else [])
+                for x in kids:
+                    if k == "offers" and size and isinstance(x, dict):
+                        x = {**x, "_size": size}   # keep the product page's link
+                    stack.append(x)
             if "price" in o and str(o.get("@type", "")).lower() == "offer":
-                label = " ".join(str(o.get(k) or "") for k in ("name", "sku", "url"))
+                label = o.get("_size") or " ".join(str(o.get(k) or "") for k in ("name", "sku", "url"))
                 if _RANGE.search(label) or re.search(r"\bsize\b", label, re.I):
                     out.append({"label": label, "price": o.get("price"), "url": o.get("url"),
                                 "in_stock": "instock" in str(o.get("availability", "")).lower().replace(" ", "")})

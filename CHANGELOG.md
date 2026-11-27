@@ -6,6 +6,9 @@
   searching and re-checking (options picked from the shop's lists, then the shop's own lookup):
   Standart Caravans' Monza XL300 reads £2,069 for size 15 / 28 mm, not its £1,699 default.
   "28mm EasyGrip Steel" counts as a 28 mm steel frame (EasyGrip is Dorema's clamp name).
+- Shops that list each size as a schema.org variant (ProductGroup → hasVariant, e.g. Awning
+  Ace) are now priced at your size: the variant's size labels its offer. Awning Ace's Camptech
+  Savanna DL read £758 at size 19; it is £1,108 (size 15: £1,035).
 - A free frame upgrade bundled on the page (a £0 "FREE 28mm Steel Frame Upgrade" item) is
   now taken into account: PriceWatch prices the base frame and notes the free upgrade, so
   Standart Caravans reads £1,939 for size 15 with 28 mm steel, not £2,069.

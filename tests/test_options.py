@@ -74,6 +74,16 @@ STANDART = ('<title>Dorema Monza XL300 | FREE 28mm Frame Upgrade | 300cm Depth</
 STANDART_FREE = STANDART.replace('</form>', '</form><div class="woobt-product woobt-product-together" data-id="9" '
                                  'data-name="FREE 28mm Steel Frame Upgrade with Dorema Monza Awning Range" '
                                  'data-new-price="100%" data-price="0" data-regular-price="0"></div>')
+AWNING_ACE = ('<title>2026 Camptech Savanna DL</title><script type="application/ld+json">'
+              '{"@context":"https://schema.org","@type":"ProductGroup","name":"Camptech Savanna DL",'
+              '"variesBy":["https://schema.org/size"],"hasVariant":['
+              '{"@type":"Product","url":"https://x/SL-06.html","sku":"SL-06","size":"(Size 6): 775-800cm",'
+              '"offers":{"@type":"Offer","price":"837.00","priceCurrency":"GBP","availability":"https://schema.org/InStock"}},'
+              '{"@type":"Product","url":"https://x/SL-15.html","sku":"SL-15","size":"(Size 15): 1000-1025cm",'
+              '"offers":{"@type":"Offer","price":"1035.00","priceCurrency":"GBP","availability":"https://schema.org/InStock"}},'
+              '{"@type":"Product","url":"https://x/SL-19.html","sku":"SL-19","size":"(Size 19): 1100-1125cm",'
+              '"offers":{"@type":"Offer","price":"1108.00","priceCurrency":"GBP","availability":"https://schema.org/InStock"}}]}'
+              '</script><p>Was £758.00</p><select name="N3_"><option value="V2062_">(Size 6): 775-800cm: £837.00</option></select>')
 NO_SIZE = SHOPIFY.replace('"Size 15 (1000-1025) / Steel 28mm"', '"Size 14 (975-1000) / Steel 28mm"')
 
 
@@ -98,7 +108,7 @@ class Shop(BaseHTTPRequestHandler):
         self.wfile.write(b)
 
     def do_GET(self):
-        body = {"/products/monza": SHOPIFY, "/product/monza-xl300/": WOO, "/products/small": NO_SIZE, "/product/standart-monza/": STANDART, "/product/standart-free/": STANDART_FREE, "/product/co-monza/": CAMPING_ONLINE, "/product/ventura-pacific/": GRANTHAM, "/product/ajax/": WOO_AJAX, "/dometic-stuga-rest-full-awning": MAGENTO,
+        body = {"/products/monza": SHOPIFY, "/product/monza-xl300/": WOO, "/products/small": NO_SIZE, "/product/standart-monza/": STANDART, "/product/standart-free/": STANDART_FREE, "/product/co-monza/": CAMPING_ONLINE, "/product/ventura-pacific/": GRANTHAM, "/product/ajax/": WOO_AJAX, "/dometic-stuga-rest-full-awning": MAGENTO, "/savanna.html": AWNING_ACE,
                 "/products/monza.js": None}.get(self.path.split("?")[0])
         if body is None:
             self.send_response(404); self.end_headers(); return
@@ -194,6 +204,13 @@ class YourOptionEverywhere(unittest.TestCase):
         self.assertIn("FREE 28mm Steel Frame Upgrade", ex.context)
         ex, _ = fetch_price(self.s, self.base + "/product/standart-free/", "15 (1000-1025) / Mega")
         self.assertIsNone(ex.price)                     # a free 28 mm steel upgrade is not Megaframe
+
+    def test_product_group_variants_by_size(self):   # Awning Ace: size on the variant, price on its offer
+        ex, url = fetch_price(self.s, self.base + "/savanna.html", "19 (1100-1125) / Steel")
+        self.assertEqual((ex.price, ex.method), (Decimal("1108.00"), "jsonld"))
+        self.assertTrue(url.endswith("/savanna.html"))
+        ex, _ = fetch_price(self.s, self.base + "/savanna.html", "15 (1000-1025) / Steel")
+        self.assertEqual(ex.price, Decimal("1035.00"))
 
     def test_shop_without_your_option_reports_no_price(self):
         ex, _ = fetch_price(self.s, self.base + "/products/small", HINT)

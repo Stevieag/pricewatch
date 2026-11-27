@@ -121,9 +121,25 @@ class LLM:
         return out
 
 
+_SENSITIVE = [
+    (re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+"), "[email]"),
+    (re.compile(r"\b(?:password|passwd|pwd|pin|token|api[_ -]?key|secret|code)\s*[:=]?\s*\S+", re.I), "[secret]"),
+    (re.compile(r"\b(?:\d[ -]?){12,19}\b"), "[number]"),                  # card / account numbers
+    (re.compile(r"\b[A-Z]{2}\d{2}(?:\s?[A-Z0-9]{4}){3,7}\b"), "[number]"),  # IBAN
+    (re.compile(r"(?:\+44\s?|\b0)7\d{3}\s?\d{6}\b|\+\d{1,3}[\s-]?\d{6,12}\b"), "[phone]"),
+]
+
+
+def _redact(t: str) -> str:
+    for rx, repl in _SENSITIVE:
+        t = rx.sub(repl, t)
+    return t
+
+
 def _safe_advice(t: str | None) -> str:
-    """The user's own shop notes, flattened and capped before going into a prompt."""
-    t = re.sub(r"[\x00-\x1f`<>{}]", " ", t or "")
+    """The user's own shop notes, flattened, with anything personal-looking masked and capped,
+    before going into a prompt (the model may not be local)."""
+    t = _redact(re.sub(r"[\x00-\x1f`<>{}]", " ", t or ""))
     return " ".join(t.split())[:MAX_ADVICE_FOR_AI]
 
 
@@ -226,6 +242,21 @@ def heuristic_same_product(a: str, b: str) -> bool:
     return len(ta & tb) / len(ta | tb) >= 0.5
 
 
+def names_agree(original: str, other: str | None) -> bool:
+    """Deterministic check the model can't talk round: model numbers match, and the names are
+    similar, or almost all of the shorter name appears in the longer one (shops pad titles)."""
+    if heuristic_same_product(original, other or ""):
+        return True
+    ta, tb = _tokens(original), _tokens(other or "")
+    if not ta or not tb:
+        return False
+    models = {t for t in ta if re.search(r"\d", t) and re.search(r"[a-z]", t)}
+    if models and not (models & tb):
+        return False
+    short, long_ = (ta, tb) if len(ta) <= len(tb) else (tb, ta)
+    return len(short) >= 3 and len(short & long_) / len(short) >= 0.8
+
+
 @dataclass
 class Candidate:
     url: str
@@ -316,8 +347,8 @@ class PriceAgent:
                     doubt = "the AI thinks this may not be the full price (monthly/deposit?)"
                 # the model can be talked round by text on the page: when the names barely match,
                 # add it for your check rather than trusting the model alone
-                if same and not heuristic_same_product(original, cand.title):
-                    doubt = doubt or "the AI says it's the same product, but the names differ a lot"
+                if same and not names_agree(original, cand.title):
+                    return False, "the AI says it's the same product, but the names differ a lot"
                 return same, doubt
             except AgentError as e:
                 log.info("LLM match failed, using heuristic: %s", e)
@@ -427,7 +458,8 @@ class PriceAgent:
             code = shares_model_code(self.known_codes, model_codes(cand.title)) if self.known_codes else None
             if not same:
                 self.db.record_skipped(item_id, cand.url, cand.title, cand.price, cand.currency,
-                                       "the AI judged it not the same product")
+                                       doubt if doubt and "names differ" in doubt
+                                       else "the AI judged it not the same product")
                 notes.append(f"{domain_of(url)}: not the same product ({cand.price}, "
                              f"you can still add it) {cand.url}")
                 continue

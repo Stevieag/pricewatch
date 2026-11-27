@@ -30,12 +30,18 @@ To import: **New ruleset → Import a ruleset**, choose the file, check it, then
 - **Workflow permissions:** *Read repository contents and packages permissions*. Leave
   "Allow GitHub Actions to create and approve pull requests" **off**.
 
-## 4. Security (Settings → Advanced Security)
+## 4. Security (Settings → *Security* section → **Advanced Security**)
 
-Already on: secret scanning, push protection, Dependabot security updates, private
-vulnerability reporting. Also turn on, where offered: **Non-provider patterns** and
-**Validity checks** for secret scanning, and **Dependabot version updates** (configured by
-`.github/dependabot.yml`).
+Some accounts still call this page *Code security* or "Code security and analysis".
+
+- Already on: secret scanning and **push protection** (free for public repos), Dependabot
+  security updates, and private vulnerability reporting.
+- **Dependabot version updates:** nothing to switch on. They're enabled by
+  `.github/dependabot.yml` being in the repo.
+- **Non-provider patterns** (private keys, connection strings, …): turn on if offered. If not,
+  PriceWatch's own scanner and gitleaks already cover them in CI.
+- **Validity checks:** only offered with GitHub Team/Enterprise Secret Protection, so not
+  available on a personal account.
 
 ## 5. Your account
 

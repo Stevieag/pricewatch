@@ -125,3 +125,25 @@ class StartStop(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class StartOrder(unittest.TestCase):
+    """Docker Desktop crashed during `start`: PriceWatch should already be up by then."""
+
+    def test_pricewatch_starts_before_docker_and_ollama(self):
+        import contextlib
+        import io
+        from unittest import mock
+
+        from pricewatch import service
+        from pricewatch.config import load_settings
+        order = []
+        s = load_settings({"PW_SEARCH_PROVIDER": "searxng", "PW_LLM_PROVIDER": "ollama"})
+        with mock.patch.object(service, "start_server", lambda s: order.append("pricewatch") or True), \
+             mock.patch.object(service, "start_searxng", lambda s: order.append("searxng") or False), \
+             mock.patch.object(service, "start_ollama", lambda s: order.append("ollama") or True), \
+             contextlib.redirect_stdout(io.StringIO()) as out:
+            code = service.start(s, open_browser=False)
+        self.assertEqual(order, ["pricewatch", "searxng", "ollama"])
+        self.assertEqual(code, 1)
+        self.assertIn("PriceWatch is running", out.getvalue())

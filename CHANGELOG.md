@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- `pricewatch start` starts PriceWatch first, then SearXNG/Docker and Ollama, so prices are
+  available at once even when Docker Desktop is slow or crashes (only the shop search needs it).
 - Fix: "Steel Megaframe" matched a shop's plain "Steel" option (an Isabella Commodore read as
   £3,224 instead of £3,678). The word that sets your frame apart (Mega, EasyGrip, Fibre…) must
   now be in the shop's option.

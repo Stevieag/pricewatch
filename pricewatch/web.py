@@ -399,6 +399,9 @@ def alt_row(app: App, a, parent_price=None) -> str:
     """One alternative shop: price, review status, and a feedback form for the AI."""
     review = a["review"] or "ok"
     note = f'<div class="review-note">{e(a["review_note"])}</div>' if a["review_note"] else ""
+    if review == "wrong":
+        note += ('<div class="muted">Not counted as a price. Give the right link below and it\'s checked '
+                 'again, or remove it if this shop doesn\'t sell it outright.</div>')
     status = ('<span class="badge warn">⚠ check failed</span>' if a["last_error"]
               else e(ago(a["last_checked_at"])))
     how = "checked"

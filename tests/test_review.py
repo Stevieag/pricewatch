@@ -24,10 +24,13 @@ class Rules(unittest.TestCase):
         for u in ["https://www.facebook.com/surreylivenews/posts/1", "https://www.youtube.com/watch?v=x",
                   "https://www.radiotimes.com/technology/new-ipad-mini-preorder-uk/",
                   "https://pricespy.co.uk/s/gta-vi/", "https://support.apple.com/en-mk/149482",
-                  "https://uk.pcmag.com/x", "https://www.lyst.co.uk/clothing/x"]:
+                  "https://uk.pcmag.com/x", "https://www.lyst.co.uk/clothing/x",
+                  "https://www.smartphonechecker.co.uk/phones/google/pixel-11-pro-xl/1tb",
+                  "https://www.uswitch.com/mobiles/google_pixel_11/"]:
             self.assertTrue(not_a_shop(u), u)
         for u in ["https://www.argos.co.uk/product/9933075", "https://www.o2.co.uk/shop/microsoft/gta",
-                  "https://www.uktoolstore.co.uk/blackdecker-hover-mower/"]:
+                  "https://www.uktoolstore.co.uk/blackdecker-hover-mower/",
+                  "https://store.google.com/gb/product/pixel_11_pro"]:   # Google's own shop
             self.assertIsNone(not_a_shop(u), u)
 
     def test_listing_pages(self):

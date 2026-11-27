@@ -66,6 +66,26 @@ _SHOPIFY_PATH = re.compile(r"^((?:/[a-z]{2}(?:-[a-z]{2})?)?(?:/collections/[^/]+
 _SHOPIFY_MARK = re.compile(r"cdn\.shopify\.com|shopify\.(?:shop|theme)|myshopify\.com|shopify-section", re.I)
 
 
+def _variants_in_page(html: str, want: str = "") -> list[dict]:
+    """Shopify pages embed variants as JSON (ShopifyAnalytics meta, product JSON scripts):
+    "variants":[{"id":…,"price":197900,…}], prices in pence. Pages also embed other products'
+    variants (recommendations), so: the list containing the linked variant id, else the first
+    list on the page (the product's own, in ShopifyAnalytics meta)."""
+    lists: list[list[dict]] = []
+    dec = json.JSONDecoder()
+    for m in re.finditer(r'"variants"\s*:\s*\[', html[:2_000_000]):
+        try:
+            arr, _ = dec.raw_decode(html, m.end() - 1)
+        except ValueError:
+            continue
+        vs = [v for v in arr if isinstance(v, dict) and "id" in v and isinstance(v.get("price"), int)]
+        if vs:
+            lists.append(vs)
+    if want:
+        return next((vs for vs in lists if any(str(v["id"]) == want for v in vs)), [])
+    return lists[0] if lists else []
+
+
 def _shopify_variant(settings: Settings, url: str, html: str, ex: Extracted) -> Extracted:
     """Shopify shops put the product's *lowest* variant price in their page data, so a link to a
     bigger size (…/products/x?variant=123) reads too low. Shopify also publishes every variant's
@@ -74,17 +94,19 @@ def _shopify_variant(settings: Settings, url: str, html: str, ex: Extracted) -> 
     m = _SHOPIFY_PATH.match(p.path)
     if not m or not _SHOPIFY_MARK.search(html[:400_000]):
         return ex
-    js_url = urlunsplit((p.scheme, p.netloc, f"/products/{m.group(2)}.js", "", ""))
-    try:
-        res = safe_get(js_url, user_agent=settings.user_agent, timeout=settings.fetch_timeout,
-                       allow_private=settings.allow_private_hosts)
-        data = json.loads(res.text)
-        variants = [v for v in data.get("variants", []) if isinstance(v, dict)]
-    except (FetchError, ValueError, AttributeError):
-        return ex
+    want = (parse_qs(p.query).get("variant") or [""])[0]
+    data, variants = {}, _variants_in_page(html, want)   # no extra request: shops rate-limit (429)
+    if not variants:
+        js_url = urlunsplit((p.scheme, p.netloc, f"/products/{m.group(2)}.js", "", ""))
+        try:
+            res = safe_get(js_url, user_agent=settings.user_agent, timeout=settings.fetch_timeout,
+                           allow_private=settings.allow_private_hosts)
+            data = json.loads(res.text)
+            variants = [v for v in data.get("variants", []) if isinstance(v, dict)]
+        except (FetchError, ValueError, AttributeError):
+            return ex
     if not variants:
         return ex
-    want = (parse_qs(p.query).get("variant") or [""])[0]
     chosen = next((v for v in variants if str(v.get("id")) == want), None)
     if chosen is None:
         if want:   # a variant the shop no longer has: don't guess
@@ -98,7 +120,7 @@ def _shopify_variant(settings: Settings, url: str, html: str, ex: Extracted) -> 
     if price <= 0:
         return ex
     title = ex.title or data.get("title")
-    vt = str(chosen.get("title") or "")
+    vt = str(chosen.get("title") or chosen.get("public_title") or "")
     if len(variants) > 1 and vt and vt.lower() != "default title" and title and vt not in title:
         title = f"{title} ({vt})"[:300]
     return Extracted(title=title, price=price, currency=ex.currency, method="shopify",

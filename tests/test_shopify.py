@@ -21,16 +21,29 @@ PRODUCT_JS = {"title": "Dorema Monza XL300 Full Caravan Awning", "variants": [
     {"id": 222, "title": "6 / Steel 28mm", "price": 145900, "available": True},
     {"id": 56081286234443, "title": "15 / Steel 28mm", "price": 197900, "available": True}]}
 
+# what Shopify themes embed (ShopifyAnalytics.meta): prices in pence, variant name in public_title
+OTHER = ('<script type="application/json">{"product":{"variants":[{"id":7,"price":99900},'
+         '{"id":8,"price":109900},{"id":9,"price":119900},{"id":10,"price":129900}]}}</script>')
+IN_PAGE = ('<script>window.ShopifyAnalytics = window.ShopifyAnalytics || {}; var meta = {"product":'
+           '{"id":9,"vendor":"Dorema","variants":[{"id":111,"price":138900,"name":"Monza - 5",'
+           '"public_title":"5 / Steel 28mm","sku":""},{"id":56081286234443,"price":197900,'
+           '"name":"Monza - 15","public_title":"15 / Steel 28mm","sku":""}]},"page":{}};</script>')
+
 
 class Shop(BaseHTTPRequestHandler):
     def log_message(self, *a):
         pass
 
+    js_hits = 0
+
     def do_GET(self):
         path = self.path.split("?")[0]
+        if path.endswith(".js"):
+            Shop.js_hits += 1
         body, ctype = {
             "/products/dorema-monza-xl300-full-caravan-awning": (PAGE, "text/html"),
             "/products/dorema-monza-xl300-full-caravan-awning.js": (json.dumps(PRODUCT_JS), "application/json"),
+            "/products/in-page": (PAGE.replace("</body>", IN_PAGE + OTHER + "</body>"), "text/html"),
             "/products/not-shopify": (PAGE.replace("cdn.shopify.com", "cdn.example.com"), "text/html"),
         }.get(path, (None, None))
         if body is None:
@@ -67,6 +80,14 @@ class ShopifyVariants(unittest.TestCase):
     def test_no_variant_uses_first_available(self):
         ex = self.get("dorema-monza-xl300-full-caravan-awning")
         self.assertEqual(ex.price, Decimal("1459"))       # 5 is sold out; 6 is what the page shows
+
+    def test_variants_read_from_the_page_without_a_second_request(self):
+        Shop.js_hits = 0
+        ex = self.get("in-page?variant=56081286234443")
+        self.assertEqual((ex.price, ex.method), (Decimal("1979"), "shopify"))
+        self.assertIn("15 / Steel 28mm", ex.title)
+        self.assertEqual(Shop.js_hits, 0)
+        self.assertEqual(self.get("in-page").price, Decimal("1389"))   # its own list, not a longer one
 
     def test_unknown_variant_and_non_shopify_unchanged(self):
         self.assertEqual(self.get("dorema-monza-xl300-full-caravan-awning?variant=999").price, Decimal("1389.00"))

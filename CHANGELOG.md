@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- README screenshots (light and dark) made from demo data, plus
+  `docs/screenshots/make_screenshots.py` to regenerate them.
 - CI hardening: actions pinned to commit SHAs (kept current by Dependabot), checkout without
   persisted credentials, job time limits.
 - Repository protection: rulesets (PR + passing CI with no bypass, no force-push/deletion,

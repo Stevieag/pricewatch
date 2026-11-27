@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- The **+ PriceWatch** bookmarklet opens PriceWatch in a new tab, so the shop's page stays open
+  (falls back to the same tab if the browser blocks it). Re-drag it from Share setup to update.
 - **Shopify shops: the right size or option.** Shopify puts the product's lowest variant price
   in its page data, so a link to a bigger size read too low (a £1,979 awning showed £1,389).
   PriceWatch now reads the linked variant's own price from the shop's `/products/<name>.js`

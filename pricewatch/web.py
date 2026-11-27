@@ -607,7 +607,8 @@ BOOKMARKLET_JS = (
     "document.querySelectorAll('script[type=\"application/ld+json\"]').forEach(s=>{try{f(JSON.parse(s.textContent))}catch(e){}});"
     "if(!p){const m=document.querySelector('meta[property=\"product:price:amount\"],meta[property=\"og:price:amount\"],[itemprop=price]');"
     "if(m)p=m.content||m.textContent||''}"
-    "location.href='__BASE__/add?text='+encodeURIComponent(location.href)+'&seen='+encodeURIComponent(String(p).trim())})()"
+    "const u='__BASE__/add?text='+encodeURIComponent(location.href)+'&seen='+encodeURIComponent(String(p).trim());"
+    "if(!window.open(u,'_blank'))location.href=u})()"
 )
 
 
@@ -617,6 +618,9 @@ def page_share(app: App, base: str) -> str:
 <h2>Desktop: bookmarklet</h2>
 <p>Drag this to your bookmarks bar, then click it on any product page:
 <a class="pill on" href="{e(bm)}">+ PriceWatch</a></p>
+<p class="muted">It opens PriceWatch in a new tab and leaves the shop's page where it was. (If your
+browser blocks the new tab, it opens in the same tab instead.) Made the bookmark before
+November 2026? Delete it and drag this one again to get the new-tab behaviour.</p>
 <p class="muted">PriceWatch has to be running for the bookmarklet to work. To keep it ready, run
 <code>python3 -m pricewatch autostart on</code> once and it starts whenever you log in.</p>
 <p class="muted">It also captures the price <i>you</i> are being shown (while signed in), so Fair Price can

@@ -169,6 +169,8 @@ def start_searxng(s: Settings) -> bool:
         return False
     if not start_docker():
         return False
+    print("  … Starting SearXNG  - the first time (or after Docker was reset) it downloads first: "
+          "a few minutes", flush=True)
     r = _compose("up", "-d", "searxng")
     if r.returncode != 0:
         _say(False, "SearXNG didn't start", (r.stderr or r.stdout).strip().splitlines()[-1:][0]

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **Better phone matches.** The agent no longer adds refurbished, renewed, used, open-box or
+  network contract listings next to a new SIM-free phone (it searches for "SIM free" and skips
+  them, offering **Add anyway**). Ones added earlier are flagged at their next check and no
+  longer count as cheaper. A shop's SIM-free page is still tried after its contract page is skipped.
 - **Type the price yourself** for shops that block automatic checks (such as Currys): when a
   link can't be read, PriceWatch offers a form for the price you see, optionally compared with a
   product you already watch. Typed prices count in history, comparisons and alerts, are never

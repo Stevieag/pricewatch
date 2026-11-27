@@ -112,9 +112,11 @@ def _review_alternative(db: DB, item, ex) -> None:
     current = db.get_item(item["id"])
     if not current or (current["review"] or "ok") in ("confirmed", "wrong"):
         return
-    from .review import price_doubt
+    from .review import offer_mismatch, price_doubt
     parent = db.get_item(item["parent_id"])
-    doubt = price_doubt(ex.price, parent["current_price"] if parent else None, ex.method)
+    doubt = (offer_mismatch(parent["title"], parent["url"], current["title"] or ex.title, current["url"])
+             if parent else None)
+    doubt = doubt or price_doubt(ex.price, parent["current_price"] if parent else None, ex.method)
     if doubt and current["review"] != "suspect":
         db.set_review(item["id"], "suspect", doubt)
 

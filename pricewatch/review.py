@@ -91,3 +91,43 @@ def shares_model_code(a: set[str], b: set[str]) -> str | None:
             if len(short) >= 5 and long_.startswith(short):
                 return short.upper()
     return None
+
+
+# ------------------------------------------------------------------ condition and phone deals
+_USED = re.compile(r"\b(refurb(ished)?|renewed|reconditioned|re-?certified|pre[-\s]?owned|pre[-\s]?loved|"
+                   r"second[-\s]?hand|used|open[-\s]?box|ex[-\s]?display|ex[-\s]?demo|grade\s?[abc]\b|"
+                   r"(?:excellent|very good|good|fair|pristine)\s+condition)\b", re.I)
+_CONTRACT = re.compile(r"\b(contracts?|pay[-\s]?monthly|airtime|tariff|upfront(\s+cost)?|"
+                       r"\d+\s?(?:gb|mb)\s+(?:of\s+)?data|unlimited\s+data|per\s+month|a\s+month|"
+                       r"\d+\s?months?\s+plan|plan\s+(?:with|from)|with\s+(?:ee|o2|vodafone|three|giffgaff|tesco mobile|sky mobile|id mobile|voxi|smarty|lebara))\b",
+                       re.I)
+_PHONE = re.compile(r"\b(smart\s?phone|mobile\s+phone|iphone|galaxy\s+(?:s|z|a|note|fold|flip)\s?\d*|"
+                    r"pixel\s+\d+|oneplus|xperia|motorola|moto\s+[a-z]\d*|nothing\s+phone|xiaomi|redmi|"
+                    r"honor\s+\d+|oppo\s+(?:find|reno)|huawei\s+(?:p|mate))\b", re.I)
+_SIM_FREE = re.compile(r"\b(sim[-\s]?free|unlocked)\b", re.I)
+
+
+def _words_of_url(url: str | None) -> str:
+    p = urlsplit(url or "")
+    return re.sub(r"[/_\-+.=&?]", " ", f"{p.path} {p.query}")
+
+
+def is_phone(title: str | None) -> bool:
+    return bool(_PHONE.search(title or ""))
+
+
+def offer_mismatch(orig_title: str | None, orig_url: str | None,
+                   cand_title: str | None, cand_url: str | None) -> str | None:
+    """Reason a listing isn't a like-for-like offer: refurbished/used against new, or a network
+    contract against a SIM-free phone. None if it looks comparable (or if your own listing is
+    itself used / on contract)."""
+    mine = f"{orig_title or ''} {_words_of_url(orig_url)}"
+    theirs = f"{cand_title or ''} {_words_of_url(cand_url)}"
+    m = _USED.search(theirs)
+    if m and not _USED.search(mine):
+        return f"looks {m.group(0).lower()}, not new"
+    if is_phone(orig_title) or is_phone(cand_title):
+        m = _CONTRACT.search(theirs)
+        if m and not _CONTRACT.search(mine) and not _SIM_FREE.search(cand_title or ""):
+            return f"looks like a network contract deal ({m.group(0).lower()}), not SIM-free"
+    return None

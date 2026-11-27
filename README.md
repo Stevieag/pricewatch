@@ -156,6 +156,11 @@ The agent only adds a shop automatically when:
 - it's a shop, not a social, video, news, review or price-comparison site;
 - it's one product's page, not a search or category list;
 - the price comes from the shop's own product data, not the page text.
+- it's the same kind of offer: new, not refurbished, renewed, used or open-box; and for phones,
+  SIM-free, not a network contract. Phone searches ask for "SIM free". Listings that fail this
+  are shown under the skipped ones with **Add anyway**, and ones added earlier are marked
+  **⚠ check this price** at their next check. If your own product is refurbished or on contract,
+  like-for-like listings are fine.
 
 **Your own products are protected too.** If a check reads a price only from the page text and
 it's far from the last one (under 60% or over 2×), PriceWatch keeps the previous price and shows

@@ -39,7 +39,8 @@ from .config import Settings
 from .db import DB
 from .fetcher import FetchError
 from .monitor import fetch_price
-from .review import looks_like_listing, model_codes, not_a_shop, price_doubt, shares_model_code
+from .review import (is_phone, looks_like_listing, model_codes, not_a_shop, offer_mismatch,
+                     price_doubt, shares_model_code)
 from .util import clean_url, domain_of, url_for_ai
 
 log = logging.getLogger("pricewatch.agent")
@@ -270,6 +271,8 @@ class PriceAgent:
                 log.info("query generation fell back to title: %s", e)
         if cleaned and cleaned.lower() not in {q.lower() for q in queries}:
             queries.append(cleaned)
+        if is_phone(title) and not re.search(r"\b(contract|refurb|renewed|used)", title, re.I):
+            queries = [q if re.search(r"sim[-\s]?free|unlocked", q, re.I) else f"{q} SIM free" for q in queries]
         if (currency or "").upper() == "GBP":
             queries = [q if " uk" in f" {q.lower()}" else f"{q} UK" for q in queries]
         return queries[:2] or [cleaned or _safe_title(title)]
@@ -291,8 +294,8 @@ class PriceAgent:
             try:
                 out = self.llm.json(
                     "Are these listings for the SAME product (same model, variant, size and "
-                    "condition)? Accessories, cases, bundles, used/refurbished or different "
-                    "sizes are NOT the same. Also say whether B's price is the FULL one-off "
+                    "condition)? Accessories, cases, bundles, used/refurbished, network "
+                    "contract deals (vs SIM-free/unlocked) or different sizes are NOT the same. Also say whether B's price is the FULL one-off "
                     "price to buy it outright (not a monthly payment, deposit, instalment, "
                     "subscription or trade-in price).\n"
                     f"{advice_txt}"
@@ -370,6 +373,10 @@ class PriceAgent:
             if url in rejected or (urlsplit(url).netloc + urlsplit(url).path) in rejected_paths:
                 notes.append(f"{domain_of(url)}: skipped - you said it's not the same product")
                 continue
+            why_not = offer_mismatch(title, item["url"], None, url)
+            if why_not:
+                notes.append(f"{domain_of(url)}: skipped - {why_not}")
+                continue
             known.add(domain_of(url))
             checked += 1
             try:
@@ -397,6 +404,12 @@ class PriceAgent:
                 notes.append(f"{domain_of(url)}: different currency ({ex.currency})")
                 continue
             cand = Candidate(final, ex.title, ex.price, ex.currency or item["currency"], ex.method)
+            why_not = offer_mismatch(title, item["url"], cand.title, cand.url)
+            if why_not:
+                self.db.record_skipped(item_id, cand.url, cand.title, cand.price, cand.currency, why_not)
+                known.discard(domain_of(url))   # the same shop's SIM-free / new page may come next
+                notes.append(f"{domain_of(url)}: not added - {why_not} ({cand.price}, you can still add it)")
+                continue
             same, doubt = self.judge(title, cand, orig_price)
             code = shares_model_code(self.known_codes, model_codes(cand.title)) if self.known_codes else None
             if not same:

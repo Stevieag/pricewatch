@@ -13,6 +13,9 @@ from .config import Settings
 from .db import DB, now
 from .extract import Extracted, extract
 from .fetcher import FetchError, browser_get, find_browser, safe_get
+import json
+import re
+from urllib.parse import parse_qs, urlsplit, urlunsplit
 
 log = logging.getLogger("pricewatch.monitor")
 
@@ -29,7 +32,7 @@ def fetch_price(settings: Settings, url: str) -> tuple[Extracted, str]:
         try:
             res = safe_get(url, user_agent=settings.user_agent, timeout=settings.fetch_timeout,
                            allow_private=settings.allow_private_hosts)
-            ex = extract(res.text)
+            ex = _shopify_variant(settings, res.url, res.text, extract(res.text))
             if ex.price is not None or mode == "never":
                 return ex, res.url
             plain = (ex, res.url)
@@ -56,7 +59,51 @@ def fetch_price(settings: Settings, url: str) -> tuple[Extracted, str]:
         raise FetchError(f"{first_error or ''} {e}".strip()) from None
     ex = extract(res.text)
     ex.method = f"{ex.method}+browser"
-    return ex, res.url
+    return _shopify_variant(settings, res.url, res.text, ex), res.url
+
+
+_SHOPIFY_PATH = re.compile(r"^((?:/[a-z]{2}(?:-[a-z]{2})?)?(?:/collections/[^/]+)?/products/([^/?#]+))/?$", re.I)
+_SHOPIFY_MARK = re.compile(r"cdn\.shopify\.com|shopify\.(?:shop|theme)|myshopify\.com|shopify-section", re.I)
+
+
+def _shopify_variant(settings: Settings, url: str, html: str, ex: Extracted) -> Extracted:
+    """Shopify shops put the product's *lowest* variant price in their page data, so a link to a
+    bigger size (…/products/x?variant=123) reads too low. Shopify also publishes every variant's
+    own price at /products/<handle>.js: use the one the link selects (or the shop's default)."""
+    p = urlsplit(url)
+    m = _SHOPIFY_PATH.match(p.path)
+    if not m or not _SHOPIFY_MARK.search(html[:400_000]):
+        return ex
+    js_url = urlunsplit((p.scheme, p.netloc, f"/products/{m.group(2)}.js", "", ""))
+    try:
+        res = safe_get(js_url, user_agent=settings.user_agent, timeout=settings.fetch_timeout,
+                       allow_private=settings.allow_private_hosts)
+        data = json.loads(res.text)
+        variants = [v for v in data.get("variants", []) if isinstance(v, dict)]
+    except (FetchError, ValueError, AttributeError):
+        return ex
+    if not variants:
+        return ex
+    want = (parse_qs(p.query).get("variant") or [""])[0]
+    chosen = next((v for v in variants if str(v.get("id")) == want), None)
+    if chosen is None:
+        if want:   # a variant the shop no longer has: don't guess
+            return ex
+        chosen = next((v for v in variants if v.get("available")), variants[0])
+    raw = chosen.get("price")
+    try:   # /products/x.js gives pence as an integer
+        price = (Decimal(raw) / 100) if isinstance(raw, int) else Decimal(str(raw))
+    except (ArithmeticError, ValueError, TypeError):
+        return ex
+    if price <= 0:
+        return ex
+    title = ex.title or data.get("title")
+    vt = str(chosen.get("title") or "")
+    if len(variants) > 1 and vt and vt.lower() != "default title" and title and vt not in title:
+        title = f"{title} ({vt})"[:300]
+    return Extracted(title=title, price=price, currency=ex.currency, method="shopify",
+                     in_stock=chosen.get("available") if isinstance(chosen.get("available"), bool) else ex.in_stock,
+                     context=f"Shopify variant {chosen.get('id')}: {vt}"[:200] if vt else None)
 
 
 def check_item(settings: Settings, db: DB, item) -> None:

@@ -271,6 +271,7 @@ Run `python3 -m pricewatch check "<product link>"`. It prints the title, price a
 | method | meaning |
 |---|---|
 | `jsonld` / `microdata` / `meta` | structured data, the most reliable |
+| `shopify` | the exact size/option your link selects, from a Shopify shop's product data |
 | `price-element` | visible text inside an element labelled "price" (e.g. Argos) |
 | `heading` / `heuristic` | first sensible £/$/€ amount; double-check it |
 | `none` | no price found, even after the browser retry |

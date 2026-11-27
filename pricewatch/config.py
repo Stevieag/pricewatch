@@ -237,9 +237,30 @@ def load_settings(env: dict[str, str] | None = None) -> Settings:
     return s
 
 
+LOOPBACK_NAMES = {"127.0.0.1", "localhost", "::1", "[::1]"}
+
+
+def remote_hosts(s: Settings) -> list[str]:
+    """Allowed Host names that aren't this computer, e.g. a Tailscale name used by `tailscale serve`."""
+    return [h for h in s.allowed_hosts if h.lower() not in LOOPBACK_NAMES]
+
+
+def default_env_file() -> Path:
+    """Where `set-token` writes when no env file exists yet: $PW_ENV_FILE, else
+    ~/.config/pricewatch/pricewatch.env (outside the repository, on purpose)."""
+    return _candidate_env_files()[0]
+
+
 def validate_settings(s: Settings) -> list[str]:
     """Return fatal problems. The server refuses to start if any exist."""
     problems = []
+    if remote_hosts(s) and not s.access_token:
+        # e.g. `tailscale serve` or a reverse proxy: PriceWatch still binds to 127.0.0.1, but
+        # other devices reach it through the proxy, so it must not run without a token.
+        problems.append(
+            f"PW_ALLOWED_HOSTS lets other devices in ({', '.join(remote_hosts(s))}) but "
+            "PW_ACCESS_TOKEN is empty. Refusing to serve them without sign-in. "
+            "Set a token with: python3 -m pricewatch set-token")
     if not s.is_loopback_bind() and not s.access_token and not s.container_loopback_only:
         problems.append(
             "PW_HOST is not loopback but PW_ACCESS_TOKEN is empty. Refusing to expose "

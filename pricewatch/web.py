@@ -94,6 +94,10 @@ class App:
         host = host_header.rsplit(":", 1)[0] if not host_header.endswith("]") else host_header
         return host.lower() in {h.lower() for h in self.allowed_hosts}
 
+    def is_local_host(self, host_header: str | None) -> bool:
+        host = (host_header or "").rsplit(":", 1)[0] if not (host_header or "").endswith("]") else host_header
+        return (host or "").lower() in {"127.0.0.1", "localhost", "[::1]"}
+
     def bearer_ok(self, auth_header: str | None) -> bool:
         if not self.s.access_token or not auth_header or not auth_header.startswith("Bearer "):
             return False
@@ -626,6 +630,10 @@ def make_handler(app: App):
             """Host check + auth. Returns False if a response was already sent."""
             if not app.host_ok(self.headers.get("Host")):
                 self.send_error(HTTPStatus.MISDIRECTED_REQUEST, "Host not allowed")
+                return False
+            if not app.s.access_token and not app.is_local_host(self.headers.get("Host")):
+                # reached through a proxy such as `tailscale serve` but no token is set
+                self.send_error(HTTPStatus.FORBIDDEN, "Set PW_ACCESS_TOKEN to use PriceWatch from other devices")
                 return False
             if path.startswith("/static/") or path in ("/login", "/manifest.webmanifest", "/healthz"):
                 return True

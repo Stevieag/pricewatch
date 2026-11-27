@@ -29,6 +29,7 @@ def main(argv=None) -> int:
     au.add_argument("action", choices=["on", "off", "status"])
     sub.add_parser("serve", help="run the web UI + scheduler in this window (Ctrl+C to stop)")
     sub.add_parser("gen-token", help="print a random access token for PW_ACCESS_TOKEN")
+    sub.add_parser("set-token", help="create a new access token and save it in your env file")
     sub.add_parser("config", help="show effective config (secrets are never printed)")
     c = sub.add_parser("check", help="fetch one URL and print the extracted price")
     c.add_argument("url")
@@ -45,6 +46,8 @@ def main(argv=None) -> int:
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO,
                         format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
+    if args.cmd == "set-token":
+        return set_token()
     if args.cmd == "gen-token":
         print(secrets.token_urlsafe(32))
         return 0
@@ -128,6 +131,44 @@ def main(argv=None) -> int:
     finally:
         sched.stop()
         httpd.server_close()
+    return 0
+
+
+def set_token() -> int:
+    """Generate an access token, write it into the env file (creating the file if needed),
+    verify it was saved, and only then show it. Works the same on macOS and Linux."""
+    import os
+    import tempfile
+
+    from .config import default_env_file, load_settings, parse_env_file
+    path = load_settings().env_file or default_env_file()
+    if path.name == ".env" and path.parent == __import__("pathlib").Path.cwd():
+        print(f"Your config is in {path}, inside a project folder. Move it to "
+              f"{default_env_file()} first (see SECURITY.md).", file=sys.stderr)
+        return 2
+    token = secrets.token_urlsafe(32)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lines = path.read_text(encoding="utf-8").splitlines() if path.exists() else \
+        ["# PriceWatch settings (kept outside the repository). See .env.example for all options."]
+    replaced = False
+    for i, line in enumerate(lines):
+        if line.strip().removeprefix("export ").lstrip().startswith("PW_ACCESS_TOKEN="):
+            lines[i] = f"PW_ACCESS_TOKEN={token}"
+            replaced = True
+    if not replaced:
+        lines.append(f"PW_ACCESS_TOKEN={token}")
+    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=".pricewatch-env-")
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines) + "\n")
+    os.chmod(tmp, 0o600)
+    os.replace(tmp, path)                       # atomic: never a half-written config
+    if parse_env_file(path).get("PW_ACCESS_TOKEN") != token:
+        print(f"Couldn't save the token in {path}. Nothing was changed for sign-in.", file=sys.stderr)
+        return 1
+    print(f"{'Replaced' if replaced else 'Saved'} the access token in {path} (readable only by you).\n")
+    print(f"  {token}\n")
+    print("Keep it in your password manager; you'll use it to sign in from other devices.")
+    print("Restart PriceWatch to use it:  python3 -m pricewatch stop && python3 -m pricewatch start")
     return 0
 
 

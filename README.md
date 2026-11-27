@@ -95,6 +95,10 @@ There are four ways to add a product:
 > so **PriceWatch must be running**. If it isn't, the browser shows "can't connect" and nothing
 > is added. Run `python3 -m pricewatch autostart on` once (macOS) so it starts whenever you log in.
 
+**Using it from your phone or another computer?** PriceWatch is local-only by default, which
+is safest. If you want remote access, see [docs/remote-access.md](docs/remote-access.md) for
+the safe way (a private Tailscale network) and what not to do.
+
 PriceWatch fetches the page and finds the price. It tries, in order: schema.org
 JSON-LD, microdata, Open Graph product tags, then a text heuristic. You'll see the
 price, then choose a frequency (*every N minutes / hours / days / weeks / months /

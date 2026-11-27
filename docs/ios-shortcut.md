@@ -5,16 +5,9 @@ share sheet of Safari and most shopping apps.
 
 ## 1. Make PriceWatch reachable from the phone
 
-The simplest safe option is [Tailscale](https://tailscale.com) on both the computer and
-the phone. In your env file (`~/.config/pricewatch/pricewatch.env`):
-
-```
-PW_HOST=0.0.0.0
-PW_ALLOWED_HOSTS=my-laptop.tailnet-name.ts.net,100.x.y.z
-PW_ACCESS_TOKEN=<output of: python -m pricewatch gen-token>
-```
-
-Restart PriceWatch.
+Follow [remote-access.md](remote-access.md) first. It sets up a private Tailscale network
+with HTTPS and an access token, which is the safe way. You'll end up with an address like
+`https://my-laptop.example-tailnet.ts.net` and a token.
 
 PriceWatch also has to be **running** when you share, or the Shortcut will fail to connect.
 To keep it ready, run this once on the Mac:
@@ -29,7 +22,7 @@ python3 -m pricewatch autostart on
 2. Add **Ask for Input** → Prompt "Check how often?" → Default answer `1d`
    (any of `15m`, `6h`, `1d`, `1w`, `1mo`, `1y`).
 3. Add **Get Contents of URL**:
-   - URL: `http://my-laptop.tailnet-name.ts.net:8765/api/share`
+   - URL: `https://my-laptop.example-tailnet.ts.net/api/share`
    - Method: **POST**
    - Headers: `Authorization` = `Bearer <your token>`
    - Request Body: **JSON**

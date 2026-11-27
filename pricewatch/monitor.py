@@ -364,6 +364,9 @@ def check_item(settings: Settings, db: DB, item) -> None:
         return
     if _hold_doubtful(db, item, ex):
         return
+    if item["parent_id"] and ex.title and (ex.context or "").startswith("option matched") \
+            and ex.title != item["title"]:
+        db.update_item(item["id"], title=ex.title[:300])   # name the option now checked, not an old one
     db.record_check(item["id"], price=ex.price, currency=ex.currency, title=ex.title,
                     method=ex.method, in_stock=ex.in_stock)
     log.info("check %s: %s %s", item["id"], ex.price, ex.currency or "")

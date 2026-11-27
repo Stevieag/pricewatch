@@ -248,3 +248,10 @@ class BookmarkletNewTab(unittest.TestCase):
         self.assertIn("window.open(u,'_blank')", BOOKMARKLET_JS)
         self.assertIn("location.href=u", BOOKMARKLET_JS)       # fallback if pop-ups are blocked
         self.assertNotIn("noopener", BOOKMARKLET_JS)            # would make window.open return null
+
+
+class BookmarkletShopifyVariant(unittest.TestCase):
+    def test_reads_the_selected_shopify_variant_first(self):
+        from pricewatch.web import BOOKMARKLET_JS
+        self.assertLess(BOOKMARKLET_JS.index("ShopifyAnalytics"), BOOKMARKLET_JS.index("ld+json"))
+        self.assertIn("get('variant')", BOOKMARKLET_JS)

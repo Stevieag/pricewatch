@@ -38,7 +38,7 @@ from decimal import Decimal
 from .config import Settings
 from .db import DB
 from .fetcher import FetchError
-from .monitor import fetch_price
+from .monitor import fetch_price, option_hint, strip_option_hint
 from .review import (is_phone, looks_like_listing, model_codes, not_a_shop, offer_mismatch,
                      price_doubt, shares_model_code)
 from .util import clean_url, domain_of, url_for_ai
@@ -380,7 +380,8 @@ class PriceAgent:
             raise AgentError("Item has no title to search for.")
         orig_price = Decimal(item["current_price"]) if item["current_price"] else None
 
-        queries = self.build_queries(title, item["currency"], domain_of(item["url"]))
+        hint = option_hint(title)             # your size/frame, e.g. "15 (1000-1025) / Steel 28 mm"
+        queries = self.build_queries(strip_option_hint(title), item["currency"], domain_of(item["url"]))
         query = " / ".join(queries)
         urls, seen_urls = [], set()
         for q in queries:  # merge results from both searches, best-ranked first
@@ -425,12 +426,15 @@ class PriceAgent:
             known.add(domain_of(url))
             checked += 1
             try:
-                ex, final = fetch_price(self.s, url)
+                ex, final = fetch_price(self.s, url, hint)
             except FetchError as e:
                 notes.append(f"{domain_of(url)}: {e}")
                 continue
             if ex.listing:
                 notes.append(f"{domain_of(url)}: skipped - a list of products, not one product page")
+                continue
+            if ex.price is None and hint and (ex.context or "").startswith("no '"):
+                notes.append(f"{domain_of(url)}: skipped - {ex.context} (your size/frame)")
                 continue
             if ex.price is None or not ex.title:
                 notes.append(f"{domain_of(url)}: no price found")

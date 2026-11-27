@@ -97,3 +97,39 @@ class ShopifyVariants(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FairPriceUsesTheLinkedVariant(unittest.TestCase):
+    """The Isabella Commodore page showed £3,678 but Fair Price said £2,430: the shop's
+    lowest size, canvas only."""
+
+    @classmethod
+    def setUpClass(cls):
+        import tempfile
+        cls.srv = ThreadingHTTPServer(("127.0.0.1", 0), Shop)
+        threading.Thread(target=cls.srv.serve_forever, daemon=True).start()
+        cls.tmp = tempfile.TemporaryDirectory()
+        cls.s = load_settings({"PW_ALLOW_PRIVATE_HOSTS": "true", "PW_BROWSER_FETCH": "never",
+                               "PW_DATA_DIR": cls.tmp.name})
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.srv.shutdown(); cls.tmp.cleanup()
+
+    def test_personas_and_baseline(self):
+        from unittest import mock
+        from pricewatch import fair
+        from pricewatch.db import DB, now
+        db = DB(self.s.db_path)
+        url = (f"http://127.0.0.1:{self.srv.server_address[1]}/products/in-page?variant=56081286234443")
+        iid = db.add_item(url=url, title="Monza", price="1979.00", currency="GBP", interval_minutes=1440)
+        with db.tx() as c:   # what the old code recorded: the lowest variant
+            c.execute("INSERT INTO fair_checks(item_id,persona,price,currency,checked_at,method) "
+                      "VALUES(?,?,?,?,?,?)", (iid, "win-chrome", "1389.00", "GBP", now() - 3600, "meta"))
+        with mock.patch.object(fair.time, "sleep"):
+            self.assertGreater(fair.run_personas(self.s, db, iid), 0)
+        rows = db.q("SELECT price, method FROM fair_checks WHERE item_id=? AND method='shopify'", (iid,))
+        self.assertTrue(rows)
+        self.assertTrue(all(r["price"] == "1979.00" for r in rows))
+        rep = fair.report(self.s, db, iid)
+        self.assertEqual((rep.baseline, rep.fair_price), (Decimal("1979.00"), Decimal("1979.00")))

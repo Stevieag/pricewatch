@@ -36,7 +36,7 @@ class Extracted:
         return self.method.split("+")[0] in RELIABLE_METHODS
 
 
-RELIABLE_METHODS = ("jsonld", "microdata", "meta", "shopify")
+RELIABLE_METHODS = ("jsonld", "microdata", "meta", "shopify", "woocommerce")
 
 
 _VOID = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta",

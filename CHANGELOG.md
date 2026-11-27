@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- **Your size and frame at every shop.** For products with options (e.g. awnings: size, frame,
+  colour), the agent and re-checks now select the option you watch, e.g. "15 (1000-1025) /
+  Steel 28 mm", on Shopify and WooCommerce shops, adding paid frame extras such as
+  "28mm Frame (15-19) (+£130)". Shops without your option are skipped and listed. Before this,
+  other shops' default option (often the smallest size) was compared, so they looked cheaper.
+- The same for shops that list one schema.org offer per size (e.g. Attwoolls, Magento: a
+  Dometic Stuga Rest read as £1,799 for size 9 is now £2,149 for size 16).
+- **Fair Price on Shopify shops** now checks the size/option your link selects. It compared
+  the shop's lowest price (e.g. £2,430 for a smaller, canvas-only awning) with yours (£3,678);
+  earlier checks of such links are ignored once a correct one exists.
+- The bookmarklet captures the price of the size/option you've selected on Shopify shops (it
+  sent the shop's lowest price, so Fair Price wrongly said you were shown less). Re-drag it.
+  Prices read from Shopify size data are labelled "shop data", not "page text".
 - The **+ PriceWatch** bookmarklet opens PriceWatch in a new tab, so the shop's page stays open
   (falls back to the same tab if the browser blocks it). Re-drag it from Share setup to update.
 - **Shopify shops: the right size or option.** Shopify puts the product's lowest variant price

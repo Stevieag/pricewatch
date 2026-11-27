@@ -20,7 +20,7 @@ from urllib.parse import parse_qs, urlsplit, urlunsplit
 log = logging.getLogger("pricewatch.monitor")
 
 
-def fetch_price(settings: Settings, url: str) -> tuple[Extracted, str]:
+def fetch_price(settings: Settings, url: str, variant_hint: str | None = None) -> tuple[Extracted, str]:
     """Fetch a page and extract its price. Returns (extracted, final_url).
 
     Plain HTTP first (fast, light). If the shop blocks it or no price is found, and a
@@ -32,9 +32,9 @@ def fetch_price(settings: Settings, url: str) -> tuple[Extracted, str]:
         try:
             res = safe_get(url, user_agent=settings.user_agent, timeout=settings.fetch_timeout,
                            allow_private=settings.allow_private_hosts)
-            ex = _shopify_variant(settings, res.url, res.text, extract(res.text))
+            ex, final = _options(settings, res.url, res.text, extract(res.text), variant_hint)
             if ex.price is not None or mode == "never":
-                return ex, res.url
+                return ex, final
             plain = (ex, res.url)
         except FetchError as e:
             if mode == "never":
@@ -59,7 +59,223 @@ def fetch_price(settings: Settings, url: str) -> tuple[Extracted, str]:
         raise FetchError(f"{first_error or ''} {e}".strip()) from None
     ex = extract(res.text)
     ex.method = f"{ex.method}+browser"
-    return _shopify_variant(settings, res.url, res.text, ex), res.url
+    ex, final = _options(settings, res.url, res.text, ex, variant_hint)
+    return ex, final
+
+
+# ------------------------------------------------------------------ product options (size, frame…)
+_RANGE = re.compile(r"(\d{3,4})\s*-\s*(\d{3,4})")
+_FRAME_WORDS = {"steel", "fibre", "fiber", "fibreglass", "glassfibre", "glass", "fibretech", "easygrip", "carbon", "carbonx",
+                "megaframe", "mega", "alu", "aluminium", "aluminum", "canvas", "22", "25", "28", "32"}
+
+
+def option_hint(title: str | None) -> str | None:
+    """The size/frame PriceWatch added to a title for a Shopify link, e.g.
+    '… Awning (15 (1000-1025) / Steel 28 mm)' -> '15 (1000-1025) / Steel 28 mm'."""
+    t = (title or "").rstrip()
+    if not t.endswith(")"):
+        return None
+    depth = 0
+    for i in range(len(t) - 1, -1, -1):
+        depth += {")": 1, "(": -1}.get(t[i], 0)
+        if depth == 0:
+            inner = t[i + 1:-1].strip()
+            return inner if _RANGE.search(inner) else None   # a size range, e.g. "(1000-1025)"
+    return None
+
+
+def strip_option_hint(title: str | None) -> str:
+    hint = option_hint(title)
+    return (title or "")[: (title or "").rfind("(" + hint)].rstrip() if hint else (title or "")
+
+
+def _words(s: str) -> set[str]:
+    s = re.sub(r"(\d+)\s*mm\b", r"\1", s.lower())
+    w = set(re.findall(r"[a-z]+|\d+", s.replace("-", " ").replace("_", " ")))
+    syn = {"fibretech": "fibre", "fibreglass": "fibre", "glassfibre": "fibre", "fiber": "fibre",
+           "aluminium": "alu", "aluminum": "alu", "megaframe": "mega"}
+    return {syn.get(x, x) for x in w}
+
+
+def _option_score(hint: str, text: str) -> int | None:
+    """None = not your option (wrong size, or a different frame). 2 = your size and frame;
+    1 = your size, the label names no frame (the shop has no frame choice)."""
+    h_rng, t_rng = _RANGE.search(hint), _RANGE.search(text)
+    if h_rng:
+        mid = (int(h_rng.group(1)) + int(h_rng.group(2))) / 2
+        if t_rng:
+            if not (int(t_rng.group(1)) <= mid <= int(t_rng.group(2))):
+                return None
+        else:   # e.g. "Size 15": same size number as yours
+            size = re.match(r"\s*(\d{1,2})\b", hint)
+            if not size or size.group(1) not in _words(text):
+                return None
+    hw = _words(_RANGE.sub(" ", hint)) & _FRAME_WORDS
+    tw = _words(_RANGE.sub(" ", text)) & _FRAME_WORDS
+    if not tw:
+        return 1
+    return 2 if _same_frame(hw, tw) else None
+
+
+def _same_frame(want: set[str], got: set[str]) -> bool:
+    """'Steel 28 mm' matches '28mm Frame' and 'Steel 28mm', not 'Steel EasyGrip' or 'Fibre'.
+    Thickness must agree when either names one; no material you didn't choose."""
+    wn, gn = {w for w in want if w.isdigit()}, {w for w in got if w.isdigit()}
+    if (wn or gn) and wn != gn:
+        return False
+    return not ({w for w in got if not w.isdigit()} - want)
+
+
+def _woo_variations(html: str) -> list[dict]:
+    import html as _h
+    m = re.search(r'data-product_variations="([^"]+)"', html)
+    if not m:
+        return []
+    try:
+        data = json.loads(_h.unescape(m.group(1)))
+    except ValueError:
+        return []
+    return [v for v in data if isinstance(v, dict) and isinstance(v.get("attributes"), dict)]
+
+
+_ADDON = re.compile(r"([^\n()<>]{2,40})\((\d{1,2})\s*-\s*(\d{1,2})\)([^\n()<>]{0,30})\(\+\s*£\s*([\d,]+(?:\.\d{1,2})?)\)")
+
+
+def _addon_lines(html: str) -> list[tuple[str, int, int, Decimal]]:
+    """Paid extras like '28mm Frame (15-19) (+£130.00)': (label, from size, to size, price)."""
+    import html as _h
+    text = _h.unescape(re.sub(r"<[^>]+>", " ", html[:2_000_000]))
+    out = []
+    for m in _ADDON.finditer(text):
+        label = " ".join((m.group(1) + " " + m.group(4)).split())
+        if _words(label) & _FRAME_WORDS - {"canvas"}:
+            try:
+                out.append((label, int(m.group(2)), int(m.group(3)), Decimal(m.group(5).replace(",", ""))))
+            except ArithmeticError:
+                pass
+    return out
+
+
+def _frame_addon(html: str, hint: str) -> tuple[str, Decimal] | None:
+    size = re.match(r"\s*(\d{1,2})\b", hint)
+    want = _words(_RANGE.sub(" ", hint)) & _FRAME_WORDS
+    for label, lo, hi, price in _addon_lines(html):
+        lw = _words(label) & _FRAME_WORDS
+        if size and lo <= int(size.group(1)) <= hi and _same_frame(want, lw):
+            return label, price
+    return None
+
+
+def _page_has_frame_options(html: str, hint: str) -> bool:
+    labels = [str(v.get("title") or v.get("public_title") or "") for v in _variants_in_page(html)]
+    labels += [" ".join(map(str, v["attributes"].values())) for v in _woo_variations(html)]
+    return any(_words(_RANGE.sub(" ", l)) & _FRAME_WORDS for l in labels)
+
+
+def _jsonld_offers(html: str) -> list[dict]:
+    """schema.org offers that name their option, e.g. Attwoolls (Magento): an AggregateOffer
+    whose offers have "sku": "ATTE2023-Size 16 (1015-1040cm)" and their own price."""
+    out = []
+    for m in re.finditer(r'<script[^>]+application/ld\+json[^>]*>(.*?)</script>', html[:2_000_000], re.S | re.I):
+        try:
+            data = json.loads(m.group(1).strip())
+        except ValueError:
+            continue
+        stack = data if isinstance(data, list) else [data]
+        while stack:
+            o = stack.pop()
+            if isinstance(o, list):
+                stack.extend(o)
+                continue
+            if not isinstance(o, dict):
+                continue
+            stack.extend(x for k in ("@graph", "offers", "hasVariant") for x in
+                         ((o.get(k) if isinstance(o.get(k), list) else [o.get(k)]) if o.get(k) else []))
+            if "price" in o and str(o.get("@type", "")).lower() == "offer":
+                label = " ".join(str(o.get(k) or "") for k in ("name", "sku", "url"))
+                if _RANGE.search(label) or re.search(r"\bsize\b", label, re.I):
+                    out.append({"label": label, "price": o.get("price"), "url": o.get("url"),
+                                "in_stock": "instock" in str(o.get("availability", "")).lower().replace(" ", "")})
+    return out
+
+
+def _options(settings: Settings, url: str, html: str, ex: Extracted, hint: str | None):
+    """Pick the product option (size, frame, colour…) the link or your choice means, and
+    return (extracted, url_of_that_option). Shopify and WooCommerce shops."""
+    if not hint:
+        return _shopify_variant(settings, url, html, ex), url
+    p = urlsplit(url)
+    best = None   # (score, price, label, url, in_stock, method)
+    m = _SHOPIFY_PATH.match(p.path)
+    if m and _SHOPIFY_MARK.search(html[:400_000]):
+        variants = _variants_in_page(html)
+        if not variants:
+            try:
+                res = safe_get(urlunsplit((p.scheme, p.netloc, f"/products/{m.group(2)}.js", "", "")),
+                               user_agent=settings.user_agent, timeout=settings.fetch_timeout,
+                               allow_private=settings.allow_private_hosts)
+                variants = [v for v in json.loads(res.text).get("variants", []) if isinstance(v, dict)]
+            except (FetchError, ValueError, AttributeError):
+                variants = []
+        for v in variants:
+            label = str(v.get("title") or v.get("public_title") or v.get("name") or "")
+            score, raw = _option_score(hint, label), v.get("price")
+            if score is None or not isinstance(raw, (int, str)):
+                continue
+            try:
+                price = (Decimal(raw) / 100) if isinstance(raw, int) else Decimal(str(raw))
+            except ArithmeticError:
+                continue
+            u = urlunsplit((p.scheme, p.netloc, p.path, f"variant={v.get('id')}", ""))
+            cand = (score, price.quantize(Decimal("0.01")), label, u, v.get("available"), "shopify")
+            best = cand if best is None or cand[0] > best[0] else best
+    for v in _woo_variations(html):
+        attrs = {k: str(val) for k, val in v["attributes"].items() if val}
+        label = " / ".join(attrs.values())
+        score = _option_score(hint, label)
+        try:
+            price = Decimal(str(v.get("display_price")))
+        except (ArithmeticError, ValueError):
+            continue
+        if score is None or price <= 0:
+            continue
+        from urllib.parse import urlencode
+        u = urlunsplit((p.scheme, p.netloc, p.path, urlencode(attrs), ""))
+        cand = (score, price.quantize(Decimal("0.01")), label, u, v.get("is_in_stock"), "woocommerce")
+        best = cand if best is None or cand[0] > best[0] else best
+    if best is not None and best[0] == 1 and (_words(_RANGE.sub(" ", hint)) & _FRAME_WORDS):
+        # your size, but the option names no frame: the frame may be a paid extra (Grantham:
+        # "28mm Frame (15-19) (+£130.00)"), or another option on the page
+        addon = _frame_addon(html, hint)
+        if addon:
+            label, extra = addon
+            best = (2, best[1] + extra, f"{best[2]} + {label}", best[3], best[4], best[5])
+        elif _page_has_frame_options(html, hint) or _addon_lines(html):
+            best = None
+    offers = _jsonld_offers(html) if best is None else []
+    for o in offers:
+        score = _option_score(hint, o["label"])
+        try:
+            price = Decimal(str(o["price"]))
+        except (ArithmeticError, ValueError):
+            continue
+        if score is None or price <= 0:
+            continue
+        label = re.sub(r"^\S*?-(?=size\b)", "", o["label"].strip(), flags=re.I) or o["label"]
+        u = o["url"] if isinstance(o["url"], str) and o["url"].startswith(("http://", "https://")) else url
+        cand = (score, price.quantize(Decimal("0.01")), label.strip()[:80], u, o["in_stock"], "jsonld")
+        best = cand if best is None or cand[0] > best[0] else best
+    has_options = bool(offers) or bool(_woo_variations(html)) or bool(m and _SHOPIFY_MARK.search(html[:400_000]))
+    if best is None:
+        if has_options:   # options exist, none is yours: don't report the default option's price
+            return Extracted(title=ex.title, price=None, currency=ex.currency, method="none",
+                             context=f"no '{hint}' option on this page"), url
+        return ex, url
+    score, price, label, u, avail, method = best
+    title = ex.title if not ex.title or label in ex.title else f"{ex.title} ({label})"
+    return Extracted(title=title, price=price, currency=ex.currency,
+                     method=method, in_stock=avail if isinstance(avail, bool) else ex.in_stock,
+                     context=f"option matched to your choice: {label}"[:200]), u
 
 
 _SHOPIFY_PATH = re.compile(r"^((?:/[a-z]{2}(?:-[a-z]{2})?)?(?:/collections/[^/]+)?/products/([^/?#]+))/?$", re.I)
@@ -128,11 +344,17 @@ def _shopify_variant(settings: Settings, url: str, html: str, ex: Extracted) -> 
                      context=f"Shopify variant {chosen.get('id')}: {vt}"[:200] if vt else None)
 
 
+def item_option_hint(db: DB, item) -> str | None:
+    """Your chosen size/frame for this product (from the product you watch)."""
+    top = db.get_item(item["parent_id"]) if item["parent_id"] else item
+    return option_hint(top["title"]) if top else None
+
+
 def check_item(settings: Settings, db: DB, item) -> None:
     if _is_manual(item):   # you type this price in; the shop blocks automatic checks
         return
     try:
-        ex, _ = fetch_price(settings, item["url"])
+        ex, _ = fetch_price(settings, item["url"], item_option_hint(db, item))
     except FetchError as e:
         db.record_check(item["id"], error=str(e))
         log.info("check %s failed: %s", item["id"], e)

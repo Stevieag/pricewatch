@@ -69,7 +69,7 @@ class World(BaseHTTPRequestHandler):
         if "search query" in prompt:
             reply = {"query": re.search(r'Product title: "([^"]+)"', prompt).group(1)}
         else:
-            b = re.search(r'B: "([^"]+)" price (\S+)', prompt)
+            b = re.search(r'<b>([^<]+)</b> price (\S+)', prompt)
             reply = {"same": "case" not in b.group(1).lower(), "full_price": b.group(2) != "20.00"}
         self._send(json.dumps({"message": {"content": json.dumps(reply)}}), "application/json")
 

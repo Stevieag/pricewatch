@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **Better phone matches.** The agent no longer adds refurbished, renewed, used, open-box or
+  network contract listings next to a new SIM-free phone (it searches for "SIM free" and skips
+  them, offering **Add anyway**). Ones added earlier are flagged at their next check and no
+  longer count as cheaper. A shop's SIM-free page is still tried after its contract page is skipped.
+- AI matching hardened against prompt injection from shop pages: titles and your notes are
+  fenced as data the model must not take instructions from, answers must be true/false (otherwise
+  the word-match fallback decides), and a "same product" verdict is only accepted when the names
+  also agree by PriceWatch's own check (otherwise it's offered under the skipped shops with
+  **Add anyway**). Emails, passwords, card/account and phone numbers in your notes are masked
+  before they reach the model (reported by GitHub's AI security review).
 - **Type the price yourself** for shops that block automatic checks (such as Currys): when a
   link can't be read, PriceWatch offers a form for the price you see, optionally compared with a
   product you already watch. Typed prices count in history, comparisons and alerts, are never

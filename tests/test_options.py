@@ -62,6 +62,15 @@ CAMPING_ONLINE = ('<title>Dorema Monza XL300 Touring Seasonal Awning 28mm Steel 
                   'size 15-1000-1025 <span class="wapf-pricing-hint">(+&pound;500.00)</span></option></select>'
                   '<select name="wapf[field_2]"><option data-wapf-label="No">No</option>'
                   '<option data-wapf-label="Yes" data-wapf-price="589">Yes (+£589.00)</option></select></form>')
+STANDART = ('<title>Dorema Monza XL300 | FREE 28mm Frame Upgrade | 300cm Depth</title>'
+            '<script type="application/ld+json">{"@type":"Product","name":"Dorema Monza XL300","offers":'
+            '{"price":"1699.00","priceCurrency":"GBP"}}</script>'
+            '<form class="variations_form cart" data-product_id="88" data-product_variations="false">'
+            '<select name="attribute_pa_monza-xl300"><option value="">Choose</option>'
+            '<option value="size-5-750-775-cm">5</option><option value="size-15-1000-1025-cm">15</option></select>'
+            '<select name="attribute_pa_frame_options"><option value=""></option>'
+            '<option value="25mm-easygrip-steel">25</option><option value="28mm-easygrip-steel">28</option>'
+            '<option value="fibretech-plus">fibre</option></select></form>')
 NO_SIZE = SHOPIFY.replace('"Size 15 (1000-1025) / Steel 28mm"', '"Size 14 (975-1000) / Steel 28mm"')
 
 
@@ -75,15 +84,18 @@ class Shop(BaseHTTPRequestHandler):
         from urllib.parse import parse_qs
         form = {k: v[0] for k, v in parse_qs(self.rfile.read(int(self.headers["Content-Length"])).decode()).items()}
         Shop.lookups.append(form)
-        prices = {("G19/1015 (1001-1025cm)", "300cm"): 2239, ("G19/1015 (1001-1025cm)", "250cm"): 1999}
-        price = prices.get((form.get("attribute_size"), form.get("attribute_depth")))
-        b = json.dumps({"display_price": price, "is_in_stock": True} if price and form.get("product_id") == "77"
-                       else False).encode()
+        prices = {("77", "G19/1015 (1001-1025cm)", "300cm"): 2239, ("77", "G19/1015 (1001-1025cm)", "250cm"): 1999,
+                  ("88", "size-15-1000-1025-cm", "28mm-easygrip-steel"): 2069,
+                  ("88", "size-15-1000-1025-cm", "25mm-easygrip-steel"): 1979}
+        price = prices.get((form.get("product_id"),
+                            form.get("attribute_size") or form.get("attribute_pa_monza-xl300"),
+                            form.get("attribute_depth") or form.get("attribute_pa_frame_options")))
+        b = json.dumps({"display_price": price, "is_in_stock": False} if price else False).encode()
         self.send_response(200); self.send_header("Content-Length", str(len(b))); self.end_headers()
         self.wfile.write(b)
 
     def do_GET(self):
-        body = {"/products/monza": SHOPIFY, "/product/monza-xl300/": WOO, "/products/small": NO_SIZE, "/product/co-monza/": CAMPING_ONLINE, "/product/ventura-pacific/": GRANTHAM, "/product/ajax/": WOO_AJAX, "/dometic-stuga-rest-full-awning": MAGENTO,
+        body = {"/products/monza": SHOPIFY, "/product/monza-xl300/": WOO, "/products/small": NO_SIZE, "/product/standart-monza/": STANDART, "/product/co-monza/": CAMPING_ONLINE, "/product/ventura-pacific/": GRANTHAM, "/product/ajax/": WOO_AJAX, "/dometic-stuga-rest-full-awning": MAGENTO,
                 "/products/monza.js": None}.get(self.path.split("?")[0])
         if body is None:
             self.send_response(404); self.end_headers(); return
@@ -164,6 +176,13 @@ class YourOptionEverywhere(unittest.TestCase):
         self.assertIn("1479.00 + extras 500.00", ex.context)
         ex, _ = fetch_price(self.s, self.base + "/product/co-monza/", "19 (1100-1125) / Steel 28 mm")
         self.assertIsNone(ex.price)                          # size not offered: no guess
+
+    def test_woocommerce_options_picked_for_you(self):   # Standart: £1,699 default, £2,069 for yours
+        ex, url = fetch_price(self.s, self.base + "/product/standart-monza/", HINT)
+        self.assertEqual((ex.price, ex.method), (Decimal("2069.00"), "woocommerce"))
+        self.assertIn("attribute_pa_frame_options=28mm-easygrip-steel", url)   # re-checks ask the same
+        self.assertIn("size-15-1000-1025-cm", url)
+        self.assertEqual(fetch_price(self.s, url)[0].price, Decimal("2069.00"))
 
     def test_shop_without_your_option_reports_no_price(self):
         ex, _ = fetch_price(self.s, self.base + "/products/small", HINT)

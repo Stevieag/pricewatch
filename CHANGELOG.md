@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- WooCommerce shops that load prices separately are now priced at your size and frame when
+  searching and re-checking (options picked from the shop's lists, then the shop's own lookup):
+  Standart Caravans' Monza XL300 reads £2,069 for size 15 / 28 mm, not its £1,699 default.
+  "28mm EasyGrip Steel" counts as a 28 mm steel frame (EasyGrip is Dorema's clamp name).
 - **WooCommerce options you select are kept.** The bookmarklet adds your selected options
   (e.g. size G19/1015, depth 300cm) to the link and captures the shown price; PriceWatch then
   prices that exact combination, from the page or WooCommerce's own lookup

@@ -123,7 +123,10 @@ def _same_frame(want: set[str], got: set[str]) -> bool:
     wn, gn = {w for w in want if w.isdigit()}, {w for w in got if w.isdigit()}
     if (wn or gn) and wn != gn:
         return False
-    if {w for w in got if not w.isdigit()} - want:      # a material/type you didn't choose
+    extra = {w for w in got if not w.isdigit()} - want
+    if wn and wn == gn:
+        extra -= {"easygrip"}   # Dorema's clamp name: "28mm EasyGrip Steel" is a 28 mm steel frame
+    if extra:                    # a material/type you didn't choose
         return False
     # the word that makes your frame different (Mega, EasyGrip, Fibre…) must be there;
     # plain "steel" may be left unsaid ("28mm Frame")
@@ -230,13 +233,50 @@ def _jsonld_offers(html: str) -> list[dict]:
     return out
 
 
-def _woo_selected(settings: Settings, url: str, html: str, ex: Extracted):
+def _woo_selects(html: str) -> dict[str, list[str]]:
+    """WooCommerce option lists: {"attribute_pa_size": ["size-15-1000-1025-cm", …], …}."""
+    import html as _h
+    out = {}
+    for m in re.finditer(r'<select\b[^>]*name="(attribute_[^"]+)"[^>]*>(.*?)</select>', html[:2_000_000], re.S | re.I):
+        vals = [_h.unescape(v) for v in re.findall(r'<option\b[^>]*value="([^"]*)"', m.group(2)) if v]
+        if vals:
+            out[_h.unescape(m.group(1))] = vals
+    return out
+
+
+def _pick_woo_options(html: str, hint: str, title: str | None) -> dict[str, str] | None:
+    """Your size and frame from each WooCommerce option list; None if a list that decides the
+    size or frame has nothing that is yours."""
+    want = _words(_RANGE.sub(" ", hint)) & _FRAME_WORDS
+    other = _words(f"{hint} {title or ''}")
+    picked = {}
+    for name, values in _woo_selects(html).items():
+        sized = [v for v in values if _RANGE.search(v)]
+        framed = [v for v in values if _words(_RANGE.sub(" ", v)) & _FRAME_WORDS]
+        if sized:
+            mine = [v for v in sized if _option_score(hint, _RANGE.search(v).group(0)) is not None]
+        elif framed:
+            mine = [v for v in framed if want and _same_frame(want, _words(v) & _FRAME_WORDS)]
+        else:   # colour, depth…: the one your product names, else the first
+            mine = [v for v in values if _words(v) and _words(v) <= other] or values[:1]
+        if not mine:
+            return None
+        picked[name] = mine[0]
+    return picked or None
+
+
+def _woo_selected(settings: Settings, url: str, html: str, ex: Extracted, hint: str | None = None):
     """A WooCommerce link that names its options (?attribute_size=…&attribute_depth=…, as the
     bookmarklet sends them): that exact combination's price, from the page or, when the shop
     loads options separately, from WooCommerce's own price lookup (?wc-ajax=get_variation)."""
     from urllib.parse import parse_qsl
     p = urlsplit(url)
     attrs = {k: v for k, v in parse_qsl(p.query) if k.startswith("attribute_") and v}
+    if not attrs and hint and _woo_options_elsewhere(html):
+        attrs = _pick_woo_options(html, hint, ex.title) or {}
+        if attrs:   # remember the exact options, so re-checks ask for the same ones
+            from urllib.parse import urlencode
+            url = urlunsplit((p.scheme, p.netloc, p.path, urlencode(attrs), ""))
     if not attrs or "variations_form" not in html:
         return None
     label = " / ".join(attrs.values())
@@ -274,7 +314,7 @@ def _woo_selected(settings: Settings, url: str, html: str, ex: Extracted):
 def _options(settings: Settings, url: str, html: str, ex: Extracted, hint: str | None):
     """Pick the product option (size, frame, colour…) the link or your choice means, and
     return (extracted, url_of_that_option). Shopify and WooCommerce shops."""
-    picked = _woo_selected(settings, url, html, ex)
+    picked = _woo_selected(settings, url, html, ex, hint)
     if picked:
         return picked
     if not hint:

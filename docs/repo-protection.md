@@ -42,8 +42,14 @@ Some accounts still call this page *Code security* or "Code security and analysi
   PriceWatch's own scanner and gitleaks already cover them in CI.
 - **Validity checks:** only offered with GitHub Team/Enterprise Secret Protection, so not
   available on a personal account.
+- **Code scanning → CodeQL → Set up → Default:** free for public repos. It checks the
+  Python code and the GitHub Actions workflows for security bugs on every pull request.
 
-## 5. Your account
+## 5. Community standards (Insights → Community standards)
+
+- **Code of conduct → Add:** pick the Contributor Covenant template GitHub offers.
+
+## 6. Your account
 
 - Two-factor authentication (passkey or authenticator app) on your GitHub account.
 - Review apps with access to the repo (Settings → GitHub Apps / Integrations), and give each

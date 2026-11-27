@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- New `pricewatch restart` and `pricewatch refresh` (restart, re-check every price, Fair Price,
+  search other shops; `refresh ID` for one product; `--no-search`, `--no-fair`, `--no-restart`).
+  `check-all` takes an optional product id.
 - **Your size and frame at every shop.** For products with options (e.g. awnings: size, frame,
   colour), the agent and re-checks now select the option you watch, e.g. "15 (1000-1025) /
   Steel 28 mm", on Shopify and WooCommerce shops, adding paid frame extras such as

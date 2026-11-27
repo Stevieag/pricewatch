@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- `docs/remote-access.md`: when (not) to enable remote access, the safe Tailscale setup
+  (`tailscale serve` + HTTPS + access token, never Funnel), hardening, and what never to do.
+  The iPhone Shortcut guide and SECURITY.md now follow it.
 - README screenshots (light and dark) made from demo data, plus
   `docs/screenshots/make_screenshots.py` to regenerate them.
 - CI hardening: actions pinned to commit SHAs (kept current by Dependabot), checkout without

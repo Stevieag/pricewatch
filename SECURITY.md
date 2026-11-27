@@ -71,8 +71,10 @@ to reach it. So PriceWatch has:
 - Request logs drop query strings.
 - JSON API writes (`/api/share`) need `Authorization: Bearer <token>`.
 
-LAN or phone access sends the token over plain HTTP. Put PriceWatch behind Tailscale,
-or a TLS reverse proxy such as Caddy, rather than exposing port 8765 directly.
+LAN or phone access over plain HTTP would send the token unencrypted. Use the setup in
+[docs/remote-access.md](docs/remote-access.md): a private Tailscale network with HTTPS
+(`tailscale serve`, never Funnel), or a TLS reverse proxy such as Caddy. Never expose port
+8765 directly or forward it on your router.
 
 ## 6. Outbound requests
 

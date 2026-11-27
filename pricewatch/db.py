@@ -103,6 +103,7 @@ MIGRATIONS = [
     ("items", "review_note", "TEXT"),
     ("fair_checks", "method", "TEXT"),     # how the price was read (jsonld, price-element, ...)
     ("fair_checks", "context", "TEXT"),    # words around the price, as evidence
+    ("items", "pending_price", "TEXT"),    # a doubtful new price awaiting your OK (own products)
 ]
 COUNTS_AS_PRICE = ("ok", "confirmed")  # review states whose price is trusted
 
@@ -254,6 +255,25 @@ class DB:
     def set_review(self, item_id: int, review: str, note: str | None = None):
         with self.tx() as c:
             c.execute("UPDATE items SET review=?, review_note=? WHERE id=?", (review, note, item_id))
+
+    def hold_price(self, item_id: int, price, note: str) -> None:
+        """Keep the current price; park a doubtful new reading until the user decides."""
+        t = now()
+        with self.tx() as c:
+            row = c.execute("SELECT interval_minutes FROM items WHERE id=?", (item_id,)).fetchone()
+            c.execute("""UPDATE items SET pending_price=?, review='suspect', review_note=?, last_error=NULL,
+                         last_checked_at=?, next_check_at=? WHERE id=?""",
+                      (_s(price), note[:400], t, t + (row["interval_minutes"] if row else 60) * 60, item_id))
+
+    def resolve_pending(self, item_id: int, accept: bool) -> None:
+        item = self.get_item(item_id)
+        if not item or item["pending_price"] is None:
+            return
+        if accept:
+            self.record_check(item_id, price=item["pending_price"], currency=item["currency"],
+                              method="accepted by you")
+        with self.tx() as c:
+            c.execute("UPDATE items SET pending_price=NULL, review='ok', review_note=NULL WHERE id=?", (item_id,))
 
     def set_url(self, item_id: int, url: str):
         with self.tx() as c:

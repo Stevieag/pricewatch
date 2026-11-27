@@ -157,6 +157,13 @@ The agent only adds a shop automatically when:
 - it's one product's page, not a search or category list;
 - the price comes from the shop's own product data, not the page text.
 
+**Your own products are protected too.** If a check reads a price only from the page text and
+it's far from the last one (under 60% or over 2×), PriceWatch keeps the previous price and shows
+**⚠ check price** on the watchlist. The product page shows the words it found the price in, with
+**Use £X** and **Keep £Y** buttons. Prices from the shop's own product data are always recorded.
+Add-ons such as insurance, protection plans, AppleCare, trade-in and delivery are skipped, and the
+shop's main "price to pay" box is preferred when there is one.
+
 Monthly, instalment and deposit offers are ignored when a page also lists the pay-in-full
 price. A shared manufacturer model number (e.g. BEMWH551) counts as the same product even if
 the AI says otherwise. Every scheduled re-check of another shop re-judges its price, so a

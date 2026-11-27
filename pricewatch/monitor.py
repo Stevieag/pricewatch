@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import logging
+from decimal import Decimal
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -68,10 +69,32 @@ def check_item(settings: Settings, db: DB, item) -> None:
     if ex.price is None:
         db.record_check(item["id"], error="No price found on the page (it may need JavaScript).")
         return
+    if _hold_doubtful(db, item, ex):
+        return
     db.record_check(item["id"], price=ex.price, currency=ex.currency, title=ex.title,
                     method=ex.method, in_stock=ex.in_stock)
     log.info("check %s: %s %s", item["id"], ex.price, ex.currency or "")
     _review_alternative(db, item, ex)
+
+
+HOLD_LOW, HOLD_HIGH = Decimal("0.6"), Decimal("2")
+
+
+def _hold_doubtful(db: DB, item, ex) -> bool:
+    """Your own products: a big jump or drop read only from page text is probably the wrong
+    figure (insurance, instalments, another variant...). Keep the old price and ask."""
+    if item["parent_id"] or ex.reliable or not item["current_price"]:
+        return False
+    cur, new = Decimal(item["current_price"]), Decimal(str(ex.price))
+    if cur <= 0 or HOLD_LOW <= new / cur <= HOLD_HIGH:
+        return False
+    from .util import fmt_price
+    ctx = f' (found in: "{ex.context}")' if ex.context else ""
+    note = (f"Read {fmt_price(new, ex.currency or item['currency'])} from the page text{ctx}, far from the "
+            f"previous {fmt_price(cur, item['currency'])}. Kept the previous price until you check.")
+    db.hold_price(item["id"], new, note)
+    log.info("check %s: held doubtful %s (was %s)", item["id"], new, cur)
+    return True
 
 
 def _review_alternative(db: DB, item, ex) -> None:

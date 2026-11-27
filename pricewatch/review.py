@@ -27,7 +27,12 @@ NOT_SHOPS = (
     "pricespy.co.uk", "pricerunner.com", "idealo.co.uk", "hotukdeals.com", "latestdeals.co.uk",
     "camelcamelcamel.com", "keepa.com", "lyst.co.uk", "lyst.com", "google.com", "google.co.uk",
     "bing.com", "duckduckgo.com",
+    # phone deal and price-comparison sites: they list contracts, you don't buy there
+    "smartphonechecker.co.uk", "mobilephonechecker.co.uk", "uswitch.com", "moneysupermarket.com",
+    "comparethemarket.com", "gocompare.com", "kelkoo.co.uk", "pricespy.com", "billmonitor.com",
 )
+# shops on a domain that is otherwise not a shop
+SHOP_HOSTS = ("store.google.com",)
 NOT_SHOP_PREFIXES = ("support.", "help.", "community.", "forum.", "forums.", "blog.", "news.", "docs.")
 
 _LISTING_PATH = re.compile(
@@ -40,6 +45,8 @@ def not_a_shop(url: str) -> str | None:
     """Reason this URL is not somewhere you can buy, or None."""
     host = (urlsplit(url).hostname or "").lower()
     d = domain_of(url)
+    if host in SHOP_HOSTS:
+        return None
     if host.startswith(NOT_SHOP_PREFIXES):
         return "a help/blog/forum page, not a shop"
     for ns in NOT_SHOPS:

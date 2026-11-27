@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Phone deal and comparison sites (Smartphone Checker, Uswitch, MoneySuperMarket and others) are
+  no longer treated as shops; the Google Store now is. Shops you've marked "wrong price" say why
+  they're still listed and what to do.
 - **Better phone matches.** The agent no longer adds refurbished, renewed, used, open-box or
   network contract listings next to a new SIM-free phone (it searches for "SIM free" and skips
   them, offering **Add anyway**). Ones added earlier are flagged at their next check and no

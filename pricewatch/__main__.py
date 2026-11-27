@@ -350,7 +350,11 @@ def check_all(s, fair_check: bool = True, item_id=None) -> int:
     for it in items:
         before = it["current_price"]
         t = time.time()
-        check_item(s, db, it)
+        try:
+            check_item(s, db, it)
+        except Exception as e:   # one odd shop page must not stop the whole run
+            logging.getLogger("pricewatch").exception("check %s crashed", it["id"])
+            db.record_check(it["id"], error=f"Internal error while checking ({type(e).__name__}).")
         now_it = db.get_item(it["id"])
         name = (now_it["title"] or domain_of(now_it["url"]))[:48]
         prefix = "  " if it["parent_id"] is None else "    ↳ "

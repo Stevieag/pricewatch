@@ -43,6 +43,7 @@ MAGENTO = ('<title>Dometic Stuga Rest (Poled) Full Awning 2026</title><script ty
                               "availability": "https://schema.org/" + ("InStock" if i in (6, 7) else "OutOfStock"),
                               "sku": f"ATTE2023-Size {9 + i} ({840 + 25 * i}-{865 + 25 * i}cm)"}
                              for i in range(11)]}}) + "</script>")
+WOO_AJAX = WOO.replace(html.escape(json.dumps(WOO_VARS)), "false")
 NO_SIZE = SHOPIFY.replace('"Size 15 (1000-1025) / Steel 28mm"', '"Size 14 (975-1000) / Steel 28mm"')
 
 
@@ -51,7 +52,7 @@ class Shop(BaseHTTPRequestHandler):
         pass
 
     def do_GET(self):
-        body = {"/products/monza": SHOPIFY, "/product/monza-xl300/": WOO, "/products/small": NO_SIZE, "/dometic-stuga-rest-full-awning": MAGENTO,
+        body = {"/products/monza": SHOPIFY, "/product/monza-xl300/": WOO, "/products/small": NO_SIZE, "/product/ajax/": WOO_AJAX, "/dometic-stuga-rest-full-awning": MAGENTO,
                 "/products/monza.js": None}.get(self.path.split("?")[0])
         if body is None:
             self.send_response(404); self.end_headers(); return
@@ -99,6 +100,11 @@ class YourOptionEverywhere(unittest.TestCase):
         ex, _ = fetch_price(self.s, self.base + "/dometic-stuga-rest-full-awning", "16 (1015-1040cm)")
         self.assertEqual((ex.price, ex.method, ex.in_stock), (Decimal("2149.00"), "jsonld", True))
         self.assertIn("Size 16 (1015-1040cm)", ex.title)
+
+    def test_woocommerce_options_loaded_separately(self):   # crashed: 'bool' is not iterable
+        ex, _ = fetch_price(self.s, self.base + "/product/ajax/", HINT)
+        self.assertIsNone(ex.price)
+        self.assertIn("loads its options separately", ex.context)
 
     def test_shop_without_your_option_reports_no_price(self):
         ex, _ = fetch_price(self.s, self.base + "/products/small", HINT)

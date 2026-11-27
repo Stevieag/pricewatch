@@ -16,6 +16,7 @@ import hmac
 import json
 import logging
 import mimetypes
+import re
 import secrets
 import time
 from decimal import Decimal
@@ -211,6 +212,8 @@ def page_index(app: App, flash="") -> str:
 <button class="small">Set</button></form>{f'<div class="alert-{kind}">{e(alert_text)}</div>' if alert_text else ''}"""
         status = (f'<span class="badge warn" title="{e(it["last_error"])}">⚠ check failed</span>'
                   if it["last_error"] else e(ago(it["last_checked_at"])))
+        if it["manual"]:
+            status = f"typed by you {e(ago(it['last_checked_at']))}"
         if it["pending_price"] is not None:
             status = f'<a class="badge warn" href="/items/{it["id"]}" title="{e(it["review_note"])}">⚠ check price</a>'
         rows.append(f"""<tr{' class="row-cheaper"' if flag else ''}>
@@ -314,8 +317,10 @@ def page_add(app: App, raw: str, seen: str = "", flash="") -> str:
         url = clean_url(url)
         ex, final = fetch_price(app.s, url)
         url = clean_url(final)
-    except (ValueError, FetchError) as err:
+    except ValueError as err:
         return page_index(app, f"Couldn't read that page: {err}")
+    except FetchError as err:
+        return page_manual(app, url, flash=f"Couldn't read that page: {err}")
     found = (f'<p class="big">{e(fmt_price(ex.price, ex.currency))}</p>'
              f'<p class="muted">found via {e(ex.method)}</p>' if ex.price is not None else
              '<p class="flash">No price found on this page (it may be rendered with JavaScript). '
@@ -350,6 +355,39 @@ def page_add(app: App, raw: str, seen: str = "", flash="") -> str:
     return layout(app, "Add", body, flash)
 
 
+def _title_from_url(url: str) -> str:
+    """'…/google-pixel-11-pro-xl-1-tb-obsidian-10307505.html' -> 'Google Pixel 11 Pro Xl 1 Tb Obsidian'."""
+    seg = [p for p in urlsplit(url).path.split("/") if p]
+    words = re.sub(r"\.[a-z]{2,5}$", "", seg[-1] if seg else "").replace("_", "-").split("-")
+    words = [w for w in words if w and not (w.isdigit() and len(w) >= 5)]
+    return " ".join(w.capitalize() for w in words)[:150]
+
+
+def page_manual(app: App, url: str, parent: int | None = None, flash="") -> str:
+    """Watch a link whose shop blocks automatic checks: you type the price you see."""
+    tops = app.db.q("SELECT id, title, url, currency FROM items WHERE parent_id IS NULL ORDER BY title")
+    opts = "".join(f'<option value="{t["id"]}"{" selected" if t["id"] == parent else ""}>'
+                   f'{e((t["title"] or domain_of(t["url"]))[:80])}</option>' for t in tops)
+    cur_opts = "".join(f'<option{" selected" if c == "GBP" else ""}>{c}</option>' for c in ("GBP", "EUR", "USD"))
+    body = f"""<section class="card"><h1>Type the price yourself</h1>
+<p class="muted">{e(url)}</p>
+<p>{e(domain_of(url))} blocks automatic checks, so PriceWatch can't read this page. Open it in your
+browser and type the price you see. It's saved in the price history and comparisons; update it on the
+product page whenever you look again. PriceWatch won't check this link itself.</p>
+<p><a href="{e(url)}" target="_blank" rel="noopener noreferrer">Open the shop's page ↗</a></p>
+<form method="post" action="/items/manual" class="stack">{csrf_field(app)}
+<input type="hidden" name="url" value="{e(url)}">
+<label>Product name <input type="text" name="title" maxlength="200" value="{e(_title_from_url(url))}" required></label>
+<label>Price <input type="text" name="price" inputmode="decimal" placeholder="e.g. 1139.99" required></label>
+<label>Currency <select name="currency">{cur_opts}</select></label>
+<label>Compare with
+<select name="parent"><option value="">Nothing: watch it as its own product</option>{opts}</select></label>
+<p class="muted">Pick the same product you already watch elsewhere to show this shop under "Other shops".</p>
+<label>Alert me at or below (optional) <input type="text" name="target" inputmode="decimal" placeholder="e.g. 999.99"></label>
+<button>Save this price</button></form></section>"""
+    return layout(app, "Type the price", body, flash)
+
+
 REVIEW_BADGES = {
     "suspect": '<span class="badge warn">⚠ check this price</span>',
     "wrong": '<span class="badge bad">✕ wrong price</span>',
@@ -363,12 +401,20 @@ def alt_row(app: App, a, parent_price=None) -> str:
     note = f'<div class="review-note">{e(a["review_note"])}</div>' if a["review_note"] else ""
     status = ('<span class="badge warn">⚠ check failed</span>' if a["last_error"]
               else e(ago(a["last_checked_at"])))
+    how = "checked"
+    typed = ""
+    if a["manual"]:
+        how, status = "price typed by you", e(ago(a["last_checked_at"]))
+        typed = price_form(app, a, "Update")
+    elif a["last_error"]:
+        typed = (f'<a class="small" href="/add-manual?{e(urlencode({"url": a["url"], "parent": a["parent_id"]}))}">'
+                 'Blocked? Type the price yourself</a>')
     open_attr = " open" if review in ("suspect", "wrong") else ""
     # only trusted prices get the green flag; flagged ones still need your check
     flag = cheaper_flag(a["current_price"], parent_price, a["currency"]) if review in ("ok", "confirmed") else ""
     return f"""<tr class="review-{e(review)}{' row-cheaper' if flag else ''}"><td><a href="{e(a['url'])}" rel="noopener noreferrer" target="_blank">
 {e(a['title'] or domain_of(a['url']))} ↗</a> {REVIEW_BADGES.get(review, '')}
-<div class="muted">{e(domain_of(a['url']))} · added by {e(a['source'])} · checked {status}</div>{note}
+<div class="muted">{e(domain_of(a['url']))} · added by {e(a['source'])} · {how} {status}</div>{note}{typed}
 <details class="feedback"{open_attr}><summary>Feedback for the AI</summary>
 <form method="post" action="/items/{a['id']}/feedback" class="stack">{csrf_field(app)}
 <label class="inline"><input type="radio" name="kind" value="correct" required> ✓ Correct: count this price</label>
@@ -381,6 +427,13 @@ def alt_row(app: App, a, parent_price=None) -> str:
 <button class="small">Send feedback</button></form></details></td>
 <td class="num">{e(fmt_price(a['current_price'], a['currency']))}{f"<div>{flag}</div>" if flag else ""}</td>
 <td><form method="post" action="/items/{a['id']}/delete">{csrf_field(app)}<button class="link">remove</button></form></td></tr>"""
+
+
+def price_form(app: App, it, label: str) -> str:
+    return (f'<form method="post" action="/items/{it["id"]}/set-price" class="row">{csrf_field(app)}'
+            f'<input type="text" name="price" inputmode="decimal" size="9" required '
+            f'aria-label="New price" placeholder="{e(it["current_price"] or "")}">'
+            f'<button class="small">{e(label)}</button></form>')
 
 
 def _range_since(rng: str):
@@ -467,14 +520,23 @@ def page_item(app: App, item_id: int, rng: str = "30d", flash="") -> str | None:
 <button class="link">Keep {e(fmt_price(it['current_price'], it['currency']))}</button></form>
 <a href="{e(it['url'])}" target="_blank" rel="noopener noreferrer">Open the shop's page ↗</a></div></div>"""
     tgt = it["target_price"] or ""
+    if it["manual"]:
+        checks_line = f"· price typed by you {e(ago(it['last_checked_at']))} · not checked automatically"
+        check_btn = price_form(app, it, "Update price")
+    else:
+        checks_line = (f"· checked every {e(human_interval(it['interval_minutes']))} · last {e(ago(it['last_checked_at']))}"
+                       f" · next {e(ago(it['next_check_at']))}{'' if it['active'] else ' · <b>paused</b>'}")
+        check_btn = f'<form method="post" action="/items/{item_id}/check">{csrf_field(app)}<button>Check now</button></form>'
+        if it["last_error"]:
+            check_btn += (f'<a href="/add-manual?{e(urlencode({"url": it["url"]}))}">'
+                          'Blocked? Type the price yourself</a>')
     body = f"""<section class="card">
 <h1>{e(it['title'] or domain_of(it['url']))}</h1>
 <p><a href="{e(it['url'])}" rel="noopener noreferrer" target="_blank">{e(domain_of(it['url']))} ↗</a>
-· checked every {e(human_interval(it['interval_minutes']))} · last {e(ago(it['last_checked_at']))}
-· next {e(ago(it['next_check_at']))}{'' if it['active'] else ' · <b>paused</b>'}</p>
+{checks_line}</p>
 <p class="big">{e(fmt_price(it['current_price'], it['currency']))}</p>{err}
 <div class="row">
-<form method="post" action="/items/{item_id}/check">{csrf_field(app)}<button>Check now</button></form>
+{check_btn}
 <form method="post" action="/items/{item_id}/delete">{csrf_field(app)}<button class="danger">Delete</button></form>
 </div></section>
 
@@ -680,6 +742,10 @@ def make_handler(app: App):
                     if not extract_url(raw) and raw.strip():  # words, not a link: search for it
                         return self.redirect("/search?" + urlencode({"q": raw.strip()[:150]}))
                     return self.html(page_add(app, raw, qs.get("seen", "")))
+                if path == "/add-manual":
+                    url = clean_url(extract_url(qs.get("url", "")) or "")
+                    par = qs.get("parent", "")
+                    return self.html(page_manual(app, url, int(par) if par.isdigit() else None))
                 if path == "/search":
                     return self.html(page_search(app, qs.get("q", "")))
                 if path == "/share":
@@ -741,6 +807,8 @@ def make_handler(app: App):
 
             if path == "/items":
                 return self.create_item(f)
+            if path == "/items/manual":
+                return self.create_manual(f)
             if path == "/advice/clear":
                 app.db.clear_advice(f.get("domain", ""))
                 back = f.get("back", "/")
@@ -779,6 +847,28 @@ def make_handler(app: App):
             app.fair.run_in_background(iid)
             self.redirect(f"/items/{iid}?" + urlencode({"msg": f"Watching. Checks every {human_interval(minutes)}."}))
 
+        def create_manual(self, f):
+            try:
+                url = clean_url(f.get("url", ""))
+            except ValueError as err:
+                return self.redirect("/?" + urlencode({"msg": str(err)}))
+            price = parse_price(f.get("price"))
+            if price is None or price <= 0:
+                return self.html(page_manual(app, url, flash="Enter the price as a number, e.g. 1139.99"))
+            cur = f.get("currency") if f.get("currency") in ("GBP", "EUR", "USD") else "GBP"
+            par = f.get("parent", "")
+            parent = app.db.get_item(int(par)) if par.isdigit() else None
+            if parent and parent["parent_id"]:
+                parent = None
+            iid = app.db.add_item(
+                url=url, title=(f.get("title") or "").strip()[:200] or None, price=None, currency=cur,
+                interval_minutes=parent["interval_minutes"] if parent else 1440,
+                target_price=parse_price(f.get("target")), parent_id=parent["id"] if parent else None,
+                source="you", review="confirmed" if parent else "ok")
+            app.db.set_manual_price(iid, price, cur)
+            msg = (f"Saved {fmt_price(price, cur)} for {domain_of(url)}. Update it on this page whenever you look again.")
+            return self.redirect(f"/items/{parent['id'] if parent else iid}?" + urlencode({"msg": msg}))
+
         def item_action(self, iid: int, action: str, f):
             it = app.db.get_item(iid)
             if not it:
@@ -787,6 +877,14 @@ def make_handler(app: App):
             if action == "delete":
                 app.db.delete_item(iid)
                 return self.redirect(back if it["parent_id"] else "/?msg=Deleted.")
+            if action == "set-price":
+                p = parse_price(f.get("price"))
+                if p is None or p <= 0:
+                    return self.redirect(back + "?msg=Enter+the+price+as+a+number.")
+                app.db.set_manual_price(iid, p, it["currency"])
+                return self.redirect(back + "?" + urlencode({"msg": f"Saved {fmt_price(p, it['currency'])}."}))
+            if action == "check" and it["manual"]:
+                return self.redirect(back + "?msg=This+shop+blocks+automatic+checks:+type+the+new+price+instead.")
             if action == "check":
                 app.db.force_due(iid)
                 return self.redirect(back + "?msg=" + "Check queued - refresh in a few seconds.".replace(" ", "+"))

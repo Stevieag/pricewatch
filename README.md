@@ -278,6 +278,13 @@ logins and history are never used. You'll see `+browser` in `method`. Settings:
 Chromium-family browsers are tried first: Firefox reports when it is being automated,
 and some bot protection picks up on that. If even that is blocked, check less often: bot protection reacts to frequent visits.
 
+**Shops that block every automatic check (e.g. Currys).** PriceWatch won't try to get round bot
+protection. Instead it offers **Type the price yourself**: open the page in your own browser, type
+the price you see, and pick which watched product to compare it with (or watch it on its own). It
+appears in the price history, "Best elsewhere" and alerts like any other price, but it's never
+fetched automatically. Update it with the **Update** box whenever you look again. Turning off a VPN
+sometimes helps, because bot protection often blocks VPN addresses.
+
 ## Roadmap
 
 - Alerts when a target is hit, or on surge or personalised-price warnings (email via SMTP, ntfy, Apprise)

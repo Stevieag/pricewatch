@@ -104,6 +104,7 @@ MIGRATIONS = [
     ("fair_checks", "method", "TEXT"),     # how the price was read (jsonld, price-element, ...)
     ("fair_checks", "context", "TEXT"),    # words around the price, as evidence
     ("items", "pending_price", "TEXT"),    # a doubtful new price awaiting your OK (own products)
+    ("items", "manual", "INTEGER NOT NULL DEFAULT 0"),  # 1 = price typed by you, never fetched
 ]
 COUNTS_AS_PRICE = ("ok", "confirmed")  # review states whose price is trusted
 
@@ -203,7 +204,7 @@ class DB:
                       (item_id, _s(price), currency, t))
 
     def due_items(self, limit=20):
-        return self.q("SELECT * FROM items WHERE active=1 AND next_check_at<=? "
+        return self.q("SELECT * FROM items WHERE active=1 AND manual=0 AND next_check_at<=? "
                       "ORDER BY next_check_at LIMIT ?", (now(), limit))
 
     def get_item(self, item_id: int):
@@ -255,6 +256,12 @@ class DB:
     def set_review(self, item_id: int, review: str, note: str | None = None):
         with self.tx() as c:
             c.execute("UPDATE items SET review=?, review_note=? WHERE id=?", (review, note, item_id))
+
+    def set_manual_price(self, item_id: int, price, currency=None) -> None:
+        """A price you typed in yourself (for shops that block automatic checks)."""
+        with self.tx() as c:
+            c.execute("UPDATE items SET manual=1, pending_price=NULL WHERE id=?", (item_id,))
+        self.record_check(item_id, price=price, currency=currency, method="typed by you")
 
     def hold_price(self, item_id: int, price, note: str) -> None:
         """Keep the current price; park a doubtful new reading until the user decides."""
@@ -347,10 +354,10 @@ class DB:
     def refresh_all(self) -> int:
         """Make every active listing (products and alternatives) due now."""
         with self.tx() as c:
-            return c.execute("UPDATE items SET next_check_at=0 WHERE active=1").rowcount
+            return c.execute("UPDATE items SET next_check_at=0 WHERE active=1 AND manual=0").rowcount
 
     def pending_count(self) -> int:
-        row = self.one("SELECT COUNT(*) AS n FROM items WHERE active=1 AND next_check_at<=?", (now(),))
+        row = self.one("SELECT COUNT(*) AS n FROM items WHERE active=1 AND manual=0 AND next_check_at<=?", (now(),))
         return row["n"] if row else 0
 
     def delete_item(self, item_id: int):

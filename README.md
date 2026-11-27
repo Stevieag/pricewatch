@@ -17,6 +17,23 @@ warn you about **personalised, surveillance and surge pricing**.
 | **v3** | Price-history graph: original vs alternatives, with hover, time ranges and a table view | ✅ |
 | **v4** | **Fair Price:** anonymous multi-profile checks, your-price vs public-price, surge detection | ✅ |
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/watchlist-dark.png">
+  <img alt="PriceWatch watchlist: GTA VI is £14.14 (20%) cheaper at ShopTo than at Amazon, two products have hit their alert price, and an air fryer price is flagged for checking" src="docs/screenshots/watchlist-light.png">
+</picture>
+
+<details>
+<summary><b>Product page:</b> price history, Fair Price and other shops</summary>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/product-dark.png">
+  <img alt="GTA VI product page: price history for Amazon, ShopTo and GAME, Fair Price checks from five anonymous shopper profiles, and the cheaper shops flagged in green" src="docs/screenshots/product-light.png">
+</picture>
+</details>
+
+<sub>Screenshots use demo data (apart from GTA VI, the shops ending in `.example` are made up).
+Regenerate them with `python3 docs/screenshots/make_screenshots.py`.</sub>
+
 ## Quick start
 
 ```bash

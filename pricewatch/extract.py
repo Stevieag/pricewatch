@@ -51,8 +51,22 @@ _NOT_THE_PRICE = ("was", "old", "strike", "previous", "rrp", "compare", "month",
                   "used", "olp", "other-seller", "othersellers", "offer-listing", "more-buying",
                   "secondary", "renewed", "refurb", "pre-owned", "preowned", "trade")
 # text right after an amount that means it is not the item price
-_NOT_PRICE_AFTER = re.compile(r"^\s*(per\s+month|a\s+month|/\s*m(on)?th|p/?m\b|monthly|x\s*\d|"
-                              r"for\s+\d+\s+months|delivery|postage|off\b|saving)", re.I)
+_NOT_PRICE_AFTER = re.compile(r"^\s*(per\s+month|a\s+month|/\s*m(on)?th|/\s*mo\b|per\s+mo\b|pcm\b|p/?m\b|"
+                              r"monthly|x\s*\d|for\s+\d+\s+months|over\s+\d+\s+months|delivery|postage|"
+                              r"off\b|saving)", re.I)
+# words just before an amount that mark an add-on or extra, not the product's own price
+_ADDON_BEFORE = re.compile(
+    r"\b(insurance|insured|protection(\s+plan)?|warranty|accidental\s+damage|damage\s+cover|"
+    r"applecare|care\s*plan|extended\s+guarantee|trade[-\s]?in|gift\s*wrap|installation|"
+    r"set[-\s]?up|recycling|subscription|membership|delivery|postage)\b[^£$€]{0,60}$", re.I)
+# page elements that hold add-ons (Amazon attach/protection widgets, warranty boxes, ...)
+_ADDON_BOX = re.compile(r"(?:^|[\s_-])(?:protection|warranty|insurance|addon|add-on|attach|applecare|"
+                        r"care-?plan|mbb|abb|services?-?offer|bundle-?offer)(?:$|[\s_-]|\w*)", re.I)
+# markers shops use for the actual price to pay (checked before any other "price" element)
+_MAIN_PRICE_HINTS = ("pricetopay", "price-to-pay", "coreprice", "apex_desktop", "apexprice",
+                     "buybox", "ourprice", "dealprice", "price-primary", "current-price",
+                     "currentprice", "now-price", "nowprice", "sale-price", "saleprice",
+                     "product-price-primary", "final-price", "finalprice")
 
 
 class _Collector(HTMLParser):
@@ -69,6 +83,7 @@ class _Collector(HTMLParser):
         # element context, so visible prices inside "price" elements / headings win
         self._stack: list[tuple[str, str | None]] = []
         self.price_text: list[str] = []
+        self.main_price_text: list[str] = []
         self.heading_text: list[str] = []
 
     def _ctx(self, tag: str, a: dict) -> str | None:
@@ -77,8 +92,12 @@ class _Collector(HTMLParser):
             return "bad"
         hint = " ".join(a.get(k, "") for k in ("class", "id", "data-test", "data-testid",
                                                 "data-qa", "itemprop", "aria-label")).lower()
-        if _OTHER_OFFER.search(hint):
-            return "bad"  # a box for used / other sellers / refurbished: nothing inside is the price
+        if _OTHER_OFFER.search(hint) or _ADDON_BOX.search(hint):
+            return "bad"  # used / other sellers / insurance / warranty boxes: nothing inside is the price
+        if any(m in hint for m in _MAIN_PRICE_HINTS) and not any(w in hint for w in _NOT_THE_PRICE):
+            return "mainprice"
+        if parent == "mainprice":
+            return "mainprice"
         if "price" in hint:
             return "bad" if any(w in hint for w in _NOT_THE_PRICE) else "price"
         if parent:
@@ -132,7 +151,9 @@ class _Collector(HTMLParser):
         if data.strip():
             self.text.append(data.strip())
             ctx = self._stack[-1][1] if self._stack else None
-            if ctx == "price":
+            if ctx == "mainprice":
+                self.main_price_text.append(data.strip())
+            elif ctx == "price":
                 self.price_text.append(data.strip())
             elif ctx == "heading":
                 self.heading_text.append(data.strip())
@@ -257,8 +278,8 @@ def extract(html: str) -> Extracted:
         return Extracted(title, None, None, "none", listing=True)
 
     # visible text: price-labelled elements first, then headings, then the whole page
-    for method, chunks in (("price-element", c.price_text), ("heading", c.heading_text),
-                           ("heuristic", c.text)):
+    for method, chunks in (("price-element", c.main_price_text), ("price-element", c.price_text),
+                           ("heading", c.heading_text), ("heuristic", c.text)):
         found = _first_amount(" ".join(chunks))
         if found:
             ctx = found[2]
@@ -284,6 +305,8 @@ def _first_amount(text: str):
             continue
         if re.search(r"\b(used|pre-owned|refurbished|renewed|other sellers?|new & used)\b[^£$€]{0,20}$", before):
             continue  # "Used from £41.29", "Other sellers on Amazon £41.29"
+        if _ADDON_BEFORE.search(text[max(0, m.start() - 80):m.start()]):
+            continue  # "1-year Accidental Damage insurance £115.99", "Protection plan £49"
         p = parse_price(m.group(2).replace(" ", ""))
         if p is not None and p > 0:
             ctx = " ".join(text[max(0, m.start() - 45):m.end() + 35].split())

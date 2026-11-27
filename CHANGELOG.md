@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **Fix: wrong prices from add-ons.** An Amazon phone was recorded at £115.99 (the
+  "1-year Accidental Damage insurance" offer) instead of £1,139.99. Extraction now skips
+  insurance, protection plans, warranties, AppleCare, trade-in, delivery and monthly
+  ("/mo", "for 10 months") amounts, and prefers the shop's main price box (Amazon
+  `priceToPay`/`corePrice`, "current price", "sale price" and similar).
+- **Safety net for your own products:** a big jump or drop (under 60% or over 2×) read only
+  from page text is held, not recorded. The watchlist shows **⚠ check price**; the product
+  page shows where the price was found, with **Use** / **Keep** buttons.
 - `docs/remote-access.md`: when (not) to enable remote access, the safe Tailscale setup
   (`tailscale serve` + HTTPS + access token, never Funnel), hardening, and what never to do.
   The iPhone Shortcut guide and SECURITY.md now follow it.

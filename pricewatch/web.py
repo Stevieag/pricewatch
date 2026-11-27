@@ -211,6 +211,8 @@ def page_index(app: App, flash="") -> str:
 <button class="small">Set</button></form>{f'<div class="alert-{kind}">{e(alert_text)}</div>' if alert_text else ''}"""
         status = (f'<span class="badge warn" title="{e(it["last_error"])}">⚠ check failed</span>'
                   if it["last_error"] else e(ago(it["last_checked_at"])))
+        if it["pending_price"] is not None:
+            status = f'<a class="badge warn" href="/items/{it["id"]}" title="{e(it["review_note"])}">⚠ check price</a>'
         rows.append(f"""<tr{' class="row-cheaper"' if flag else ''}>
 <td><a href="/items/{it['id']}">{e(it['title'] or domain_of(it['url']))}</a>
   <div class="muted">{e(domain_of(it['url']))}{'' if it['active'] else ' · paused'}</div></td>
@@ -457,6 +459,13 @@ def page_item(app: App, item_id: int, rng: str = "30d", flash="") -> str | None:
 
     fair_html = render_fair(app, it)
     err = f'<p class="flash">Last check failed: {e(it["last_error"])}</p>' if it["last_error"] else ""
+    if it["pending_price"] is not None:
+        err += f"""<div class="verdict warn"><b>Check this price</b><p>{e(it['review_note'])}</p>
+<div class="row"><form method="post" action="/items/{item_id}/accept-price">{csrf_field(app)}
+<button>Use {e(fmt_price(it['pending_price'], it['currency']))}</button></form>
+<form method="post" action="/items/{item_id}/keep-price">{csrf_field(app)}
+<button class="link">Keep {e(fmt_price(it['current_price'], it['currency']))}</button></form>
+<a href="{e(it['url'])}" target="_blank" rel="noopener noreferrer">Open the shop's page ↗</a></div></div>"""
     tgt = it["target_price"] or ""
     body = f"""<section class="card">
 <h1>{e(it['title'] or domain_of(it['url']))}</h1>
@@ -799,6 +808,9 @@ def make_handler(app: App):
                 app.db.record_feedback(app.db.get_item(aid), "correct", "added from skipped list",
                                        domain_of(k["url"]))
                 return self.redirect(back + "?" + urlencode({"msg": f"Added {domain_of(k['url'])} - it now counts as a price for this product."}))
+            if action in ("accept-price", "keep-price"):
+                app.db.resolve_pending(iid, accept=action == "accept-price")
+                return self.redirect(back + "?msg=" + ("Price+updated." if action == "accept-price" else "Kept+the+previous+price."))
             if action == "target":
                 raw = (f.get("target") or "").strip()
                 tp = parse_price(raw) if raw else None

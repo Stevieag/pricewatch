@@ -223,14 +223,18 @@ def _quit_mac_app(name: str) -> None:
 
 def start(s: Settings, open_browser: bool = True) -> int:
     print("Starting PriceWatch\n")
+    # PriceWatch first: price checks don't need Docker or Ollama (only the shop search does),
+    # so a slow or broken Docker Desktop never keeps your prices away
+    server_ok = start_server(s)
+    if server_ok and open_browser:
+        webbrowser.open(server_url(s))
     ok = True
     if s.search_provider == "searxng":
         ok &= start_searxng(s)
     if s.llm_provider == "ollama":
         ok &= start_ollama(s)
-    server_ok = start_server(s)
-    if server_ok and open_browser:
-        webbrowser.open(server_url(s))
+    if not ok and server_ok:
+        print("  … PriceWatch is running; only the search for other shops needs the parts above.")
     print(f"\n{'Ready' if ok and server_ok else 'Started with problems (see above)'} - "
           f"{server_url(s)}\nStop everything with: python3 -m pricewatch stop")
     return 0 if ok and server_ok else 1

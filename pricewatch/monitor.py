@@ -172,6 +172,33 @@ def _page_has_frame_options(html: str, hint: str) -> bool:
     return any(_words(_RANGE.sub(" ", l)) & _FRAME_WORDS for l in labels)
 
 
+def _jsonld_offers(html: str) -> list[dict]:
+    """schema.org offers that name their option, e.g. Attwoolls (Magento): an AggregateOffer
+    whose offers have "sku": "ATTE2023-Size 16 (1015-1040cm)" and their own price."""
+    out = []
+    for m in re.finditer(r'<script[^>]+application/ld\+json[^>]*>(.*?)</script>', html[:2_000_000], re.S | re.I):
+        try:
+            data = json.loads(m.group(1).strip())
+        except ValueError:
+            continue
+        stack = data if isinstance(data, list) else [data]
+        while stack:
+            o = stack.pop()
+            if isinstance(o, list):
+                stack.extend(o)
+                continue
+            if not isinstance(o, dict):
+                continue
+            stack.extend(x for k in ("@graph", "offers", "hasVariant") for x in
+                         ((o.get(k) if isinstance(o.get(k), list) else [o.get(k)]) if o.get(k) else []))
+            if "price" in o and str(o.get("@type", "")).lower() == "offer":
+                label = " ".join(str(o.get(k) or "") for k in ("name", "sku", "url"))
+                if _RANGE.search(label) or re.search(r"\bsize\b", label, re.I):
+                    out.append({"label": label, "price": o.get("price"), "url": o.get("url"),
+                                "in_stock": "instock" in str(o.get("availability", "")).lower().replace(" ", "")})
+    return out
+
+
 def _options(settings: Settings, url: str, html: str, ex: Extracted, hint: str | None):
     """Pick the product option (size, frame, colour…) the link or your choice means, and
     return (extracted, url_of_that_option). Shopify and WooCommerce shops."""
@@ -225,7 +252,20 @@ def _options(settings: Settings, url: str, html: str, ex: Extracted, hint: str |
             best = (2, best[1] + extra, f"{best[2]} + {label}", best[3], best[4], best[5])
         elif _page_has_frame_options(html, hint) or _addon_lines(html):
             best = None
-    has_options = bool(_woo_variations(html)) or bool(m and _SHOPIFY_MARK.search(html[:400_000]))
+    offers = _jsonld_offers(html) if best is None else []
+    for o in offers:
+        score = _option_score(hint, o["label"])
+        try:
+            price = Decimal(str(o["price"]))
+        except (ArithmeticError, ValueError):
+            continue
+        if score is None or price <= 0:
+            continue
+        label = re.sub(r"^\S*?-(?=size\b)", "", o["label"].strip(), flags=re.I) or o["label"]
+        u = o["url"] if isinstance(o["url"], str) and o["url"].startswith(("http://", "https://")) else url
+        cand = (score, price.quantize(Decimal("0.01")), label.strip()[:80], u, o["in_stock"], "jsonld")
+        best = cand if best is None or cand[0] > best[0] else best
+    has_options = bool(offers) or bool(_woo_variations(html)) or bool(m and _SHOPIFY_MARK.search(html[:400_000]))
     if best is None:
         if has_options:   # options exist, none is yours: don't report the default option's price
             return Extracted(title=ex.title, price=None, currency=ex.currency, method="none",

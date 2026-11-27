@@ -36,6 +36,13 @@ WOO = ('<title>Dorema - Monza XL300 Full Awning</title>'
        '<label>28mm Frame (15-19) <span>(+&pound;130.00)</span></label>'
        '<label>FibreTech Frame (15-19) Touring Only (+&pound;290.00)</label>'
        '<label>Starlon Carpet (12-15) (+&pound;144.00)</label>')
+MAGENTO = ('<title>Dometic Stuga Rest (Poled) Full Awning 2026</title><script type="application/ld+json">'
+           + json.dumps({"@type": "Product", "name": "Dometic Stuga Rest (Poled) Full Awning 2026",
+                         "offers": {"@type": "AggregateOffer", "lowPrice": "1799.00", "offers": [
+                             {"@type": "Offer", "price": f"{1799 + 50 * i}.00", "priceCurrency": "GBP",
+                              "availability": "https://schema.org/" + ("InStock" if i in (6, 7) else "OutOfStock"),
+                              "sku": f"ATTE2023-Size {9 + i} ({840 + 25 * i}-{865 + 25 * i}cm)"}
+                             for i in range(11)]}}) + "</script>")
 NO_SIZE = SHOPIFY.replace('"Size 15 (1000-1025) / Steel 28mm"', '"Size 14 (975-1000) / Steel 28mm"')
 
 
@@ -44,7 +51,7 @@ class Shop(BaseHTTPRequestHandler):
         pass
 
     def do_GET(self):
-        body = {"/products/monza": SHOPIFY, "/product/monza-xl300/": WOO, "/products/small": NO_SIZE,
+        body = {"/products/monza": SHOPIFY, "/product/monza-xl300/": WOO, "/products/small": NO_SIZE, "/dometic-stuga-rest-full-awning": MAGENTO,
                 "/products/monza.js": None}.get(self.path.split("?")[0])
         if body is None:
             self.send_response(404); self.end_headers(); return
@@ -87,6 +94,11 @@ class YourOptionEverywhere(unittest.TestCase):
         self.assertEqual((ex.price, ex.method), (Decimal("2069.00"), "woocommerce"))   # £1,939 + £130
         self.assertIn("attribute_pa_size=15-1000-1025cm", url)
         self.assertIn("28mm Frame", ex.title)
+
+    def test_per_size_offers_in_shop_data(self):   # Attwoolls showed £1,799 (size 9)
+        ex, _ = fetch_price(self.s, self.base + "/dometic-stuga-rest-full-awning", "16 (1015-1040cm)")
+        self.assertEqual((ex.price, ex.method, ex.in_stock), (Decimal("2149.00"), "jsonld", True))
+        self.assertIn("Size 16 (1015-1040cm)", ex.title)
 
     def test_shop_without_your_option_reports_no_price(self):
         ex, _ = fetch_price(self.s, self.base + "/products/small", HINT)

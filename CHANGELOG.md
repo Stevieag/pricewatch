@@ -7,6 +7,8 @@
   Steel 28 mm", on Shopify and WooCommerce shops, adding paid frame extras such as
   "28mm Frame (15-19) (+£130)". Shops without your option are skipped and listed. Before this,
   other shops' default option (often the smallest size) was compared, so they looked cheaper.
+- The same for shops that list one schema.org offer per size (e.g. Attwoolls, Magento: a
+  Dometic Stuga Rest read as £1,799 for size 9 is now £2,149 for size 16).
 - **Fair Price on Shopify shops** now checks the size/option your link selects. It compared
   the shop's lowest price (e.g. £2,430 for a smaller, canvas-only awning) with yours (£3,678);
   earlier checks of such links are ignored once a correct one exists.

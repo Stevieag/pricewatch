@@ -74,6 +74,7 @@ class ShopifyVariants(unittest.TestCase):
     def test_linked_variant_price(self):
         ex = self.get("dorema-monza-xl300-full-caravan-awning?variant=56081286234443")
         self.assertEqual((ex.price, ex.currency, ex.method), (Decimal("1979"), "GBP", "shopify"))
+        self.assertEqual(str(ex.price), "1979.00")
         self.assertTrue(ex.reliable)
         self.assertIn("15 / Steel 28mm", ex.title)
 

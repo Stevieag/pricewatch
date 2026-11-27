@@ -114,7 +114,7 @@ def _shopify_variant(settings: Settings, url: str, html: str, ex: Extracted) -> 
         chosen = next((v for v in variants if v.get("available")), variants[0])
     raw = chosen.get("price")
     try:   # /products/x.js gives pence as an integer
-        price = (Decimal(raw) / 100) if isinstance(raw, int) else Decimal(str(raw))
+        price = ((Decimal(raw) / 100) if isinstance(raw, int) else Decimal(str(raw))).quantize(Decimal("0.01"))
     except (ArithmeticError, ValueError, TypeError):
         return ex
     if price <= 0:

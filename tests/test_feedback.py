@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 Stevieag and PriceWatch contributors
-"""Feedback for the AI - replays the real O2 case: a shop's first price is a monthly £20,
+"""Feedback for the AI - a network-shop pattern: a shop's first price is a monthly £20,
 the full price is on ?paymentTab=pay-in-full, and the user teaches PriceWatch that."""
 import json
 import re

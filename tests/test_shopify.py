@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 Stevieag and PriceWatch contributors
-"""Glossop Awnings (Shopify): the page data says £1,389.00, the lowest size, but the link's
-variant (a bigger size) costs £1,979.00."""
+"""Shopify: the page data shows the lowest variant's price, but the link's ?variant= (a bigger
+size) costs more. Products and prices are made up."""
 import json
 import threading
 import unittest
@@ -11,23 +11,23 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pricewatch.config import load_settings
 from pricewatch.monitor import fetch_price
 
-PAGE = """<html><head><title>Dorema Monza XL300 Full Caravan Awning</title>
-<meta property="og:title" content="Dorema Monza XL300 Full Caravan Awning">
-<meta property="og:price:amount" content="1,389.00"><meta property="og:price:currency" content="GBP">
+PAGE = """<html><head><title>Acme Gazebo G300</title>
+<meta property="og:title" content="Acme Gazebo G300">
+<meta property="og:price:amount" content="289.00"><meta property="og:price:currency" content="GBP">
 <link rel="preconnect" href="https://cdn.shopify.com"></head>
-<body><div class="price">£1,979.00</div></body></html>"""
-PRODUCT_JS = {"title": "Dorema Monza XL300 Full Caravan Awning", "variants": [
-    {"id": 111, "title": "5 / Steel 28mm", "price": 138900, "available": False},
-    {"id": 222, "title": "6 / Steel 28mm", "price": 145900, "available": True},
-    {"id": 56081286234443, "title": "15 / Steel 28mm", "price": 197900, "available": True}]}
+<body><div class="price">£579.00</div></body></html>"""
+PRODUCT_JS = {"title": "Acme Gazebo G300", "variants": [
+    {"id": 111, "title": "5 / Steel 28mm", "price": 28900, "available": False},
+    {"id": 222, "title": "6 / Steel 28mm", "price": 35900, "available": True},
+    {"id": 1001, "title": "3 / Steel 28mm", "price": 57900, "available": True}]}
 
 # what Shopify themes embed (ShopifyAnalytics.meta): prices in pence, variant name in public_title
 OTHER = ('<script type="application/json">{"product":{"variants":[{"id":7,"price":99900},'
          '{"id":8,"price":109900},{"id":9,"price":119900},{"id":10,"price":129900}]}}</script>')
 IN_PAGE = ('<script>window.ShopifyAnalytics = window.ShopifyAnalytics || {}; var meta = {"product":'
-           '{"id":9,"vendor":"Dorema","variants":[{"id":111,"price":138900,"name":"Monza - 5",'
-           '"public_title":"5 / Steel 28mm","sku":""},{"id":56081286234443,"price":197900,'
-           '"name":"Monza - 15","public_title":"15 / Steel 28mm","sku":""}]},"page":{}};</script>')
+           '{"id":9,"vendor":"Acme","variants":[{"id":111,"price":28900,"name":"G300 - 5",'
+           '"public_title":"5 / Steel 28mm","sku":""},{"id":1001,"price":57900,'
+           '"name":"G300 - 3","public_title":"3 / Steel 28mm","sku":""}]},"page":{}};</script>')
 
 
 class Shop(BaseHTTPRequestHandler):
@@ -41,8 +41,8 @@ class Shop(BaseHTTPRequestHandler):
         if path.endswith(".js"):
             Shop.js_hits += 1
         body, ctype = {
-            "/products/dorema-monza-xl300-full-caravan-awning": (PAGE, "text/html"),
-            "/products/dorema-monza-xl300-full-caravan-awning.js": (json.dumps(PRODUCT_JS), "application/json"),
+            "/products/acme-gazebo-g300": (PAGE, "text/html"),
+            "/products/acme-gazebo-g300.js": (json.dumps(PRODUCT_JS), "application/json"),
             "/products/in-page": (PAGE.replace("</body>", IN_PAGE + OTHER + "</body>"), "text/html"),
             "/products/not-shopify": (PAGE.replace("cdn.shopify.com", "cdn.example.com"), "text/html"),
         }.get(path, (None, None))
@@ -72,27 +72,27 @@ class ShopifyVariants(unittest.TestCase):
         return fetch_price(self.s, self.base + path)[0]
 
     def test_linked_variant_price(self):
-        ex = self.get("dorema-monza-xl300-full-caravan-awning?variant=56081286234443")
-        self.assertEqual((ex.price, ex.currency, ex.method), (Decimal("1979"), "GBP", "shopify"))
-        self.assertEqual(str(ex.price), "1979.00")
+        ex = self.get("acme-gazebo-g300?variant=1001")
+        self.assertEqual((ex.price, ex.currency, ex.method), (Decimal("579"), "GBP", "shopify"))
+        self.assertEqual(str(ex.price), "579.00")
         self.assertTrue(ex.reliable)
-        self.assertIn("15 / Steel 28mm", ex.title)
+        self.assertIn("3 / Steel 28mm", ex.title)
 
     def test_no_variant_uses_first_available(self):
-        ex = self.get("dorema-monza-xl300-full-caravan-awning")
-        self.assertEqual(ex.price, Decimal("1459"))       # 5 is sold out; 6 is what the page shows
+        ex = self.get("acme-gazebo-g300")
+        self.assertEqual(ex.price, Decimal("359"))       # 5 is sold out; 6 is what the page shows
 
     def test_variants_read_from_the_page_without_a_second_request(self):
         Shop.js_hits = 0
-        ex = self.get("in-page?variant=56081286234443")
-        self.assertEqual((ex.price, ex.method), (Decimal("1979"), "shopify"))
-        self.assertIn("15 / Steel 28mm", ex.title)
+        ex = self.get("in-page?variant=1001")
+        self.assertEqual((ex.price, ex.method), (Decimal("579"), "shopify"))
+        self.assertIn("3 / Steel 28mm", ex.title)
         self.assertEqual(Shop.js_hits, 0)
-        self.assertEqual(self.get("in-page").price, Decimal("1389"))   # its own list, not a longer one
+        self.assertEqual(self.get("in-page").price, Decimal("289"))   # its own list, not a longer one
 
     def test_unknown_variant_and_non_shopify_unchanged(self):
-        self.assertEqual(self.get("dorema-monza-xl300-full-caravan-awning?variant=999").price, Decimal("1389.00"))
-        self.assertEqual(self.get("not-shopify?variant=56081286234443").method, "meta")
+        self.assertEqual(self.get("acme-gazebo-g300?variant=999").price, Decimal("289.00"))
+        self.assertEqual(self.get("not-shopify?variant=1001").method, "meta")
 
 
 if __name__ == "__main__":
@@ -100,8 +100,8 @@ if __name__ == "__main__":
 
 
 class FairPriceUsesTheLinkedVariant(unittest.TestCase):
-    """The Isabella Commodore page showed £3,678 but Fair Price said £2,430: the shop's
-    lowest size, canvas only."""
+    """Fair Price must compare the same variant: otherwise it reports the shop's lowest
+    variant as everyone else's price."""
 
     @classmethod
     def setUpClass(cls):
@@ -121,15 +121,15 @@ class FairPriceUsesTheLinkedVariant(unittest.TestCase):
         from pricewatch import fair
         from pricewatch.db import DB, now
         db = DB(self.s.db_path)
-        url = (f"http://127.0.0.1:{self.srv.server_address[1]}/products/in-page?variant=56081286234443")
-        iid = db.add_item(url=url, title="Monza", price="1979.00", currency="GBP", interval_minutes=1440)
+        url = (f"http://127.0.0.1:{self.srv.server_address[1]}/products/in-page?variant=1001")
+        iid = db.add_item(url=url, title="Gazebo", price="579.00", currency="GBP", interval_minutes=1440)
         with db.tx() as c:   # what the old code recorded: the lowest variant
             c.execute("INSERT INTO fair_checks(item_id,persona,price,currency,checked_at,method) "
-                      "VALUES(?,?,?,?,?,?)", (iid, "win-chrome", "1389.00", "GBP", now() - 3600, "meta"))
+                      "VALUES(?,?,?,?,?,?)", (iid, "win-chrome", "289.00", "GBP", now() - 3600, "meta"))
         with mock.patch.object(fair.time, "sleep"):
             self.assertGreater(fair.run_personas(self.s, db, iid), 0)
         rows = db.q("SELECT price, method FROM fair_checks WHERE item_id=? AND method='shopify'", (iid,))
         self.assertTrue(rows)
-        self.assertTrue(all(r["price"] == "1979.00" for r in rows))
+        self.assertTrue(all(r["price"] == "579.00" for r in rows))
         rep = fair.report(self.s, db, iid)
-        self.assertEqual((rep.baseline, rep.fair_price), (Decimal("1979.00"), Decimal("1979.00")))
+        self.assertEqual((rep.baseline, rep.fair_price), (Decimal("579.00"), Decimal("579.00")))

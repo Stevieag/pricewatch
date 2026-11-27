@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 Stevieag and PriceWatch contributors
-"""Rules from the real find-better run: non-shops, list pages, monthly offers, model numbers,
+"""Rules for find-better results: non-shops, list pages, monthly offers, model numbers,
 and re-judging prices after every check."""
 import json
 import tempfile
@@ -25,12 +25,12 @@ class Rules(unittest.TestCase):
                   "https://www.radiotimes.com/technology/new-ipad-mini-preorder-uk/",
                   "https://pricespy.co.uk/s/gta-vi/", "https://support.apple.com/en-mk/149482",
                   "https://uk.pcmag.com/x", "https://www.lyst.co.uk/clothing/x",
-                  "https://www.smartphonechecker.co.uk/phones/google/pixel-11-pro-xl/1tb",
-                  "https://www.uswitch.com/mobiles/google_pixel_11/"]:
+                  "https://www.smartphonechecker.co.uk/phones/google/galaxy-s26-ultra/1tb",
+                  "https://www.uswitch.com/mobiles/samsung_galaxy_s26/"]:
             self.assertTrue(not_a_shop(u), u)
         for u in ["https://www.argos.co.uk/product/9933075", "https://www.o2.co.uk/shop/microsoft/gta",
                   "https://www.uktoolstore.co.uk/blackdecker-hover-mower/",
-                  "https://store.google.com/gb/product/pixel_11_pro"]:   # Google's own shop
+                  "https://store.google.com/gb/product/pixel_10"]:   # Google's own shop
             self.assertIsNone(not_a_shop(u), u)
 
     def test_listing_pages(self):

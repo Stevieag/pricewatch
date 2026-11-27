@@ -3,43 +3,40 @@
 ## Unreleased
 
 - WooCommerce shops that load prices separately are now priced at your size and frame when
-  searching and re-checking (options picked from the shop's lists, then the shop's own lookup):
-  Standart Caravans' Monza XL300 reads £2,069 for size 15 / 28 mm, not its £1,699 default.
-  "28mm EasyGrip Steel" counts as a 28 mm steel frame (EasyGrip is Dorema's clamp name).
-- Shops that list each size as a schema.org variant (ProductGroup → hasVariant, e.g. Awning
-  Ace) are now priced at your size: the variant's size labels its offer. Awning Ace's Camptech
-  Savanna DL read £758 at size 19; it is £1,108 (size 15: £1,035).
-- A free frame upgrade bundled on the page (a £0 "FREE 28mm Steel Frame Upgrade" item) is
-  now taken into account: PriceWatch prices the base frame and notes the free upgrade, so
-  Standart Caravans reads £1,939 for size 15 with 28 mm steel, not £2,069.
+  searching and re-checking (options picked from the shop's lists, then the shop's own lookup),
+  instead of the shop's default option. A frame named with a clamp brand ("28mm EasyGrip
+  Steel") counts as that frame.
+- Shops that list each size as a schema.org variant (ProductGroup → hasVariant) are now priced
+  at your size: the variant's size labels its offer. Before, the page's lowest price was read.
+- A free upgrade bundled on the page (a £0 "FREE … Upgrade" item, WooCommerce WPC "bought
+  together") is now taken into account: PriceWatch prices the base option and notes the free
+  upgrade, instead of charging for the upgraded option.
 - **WooCommerce options you select are kept.** The bookmarklet adds your selected options
-  (e.g. size G19/1015, depth 300cm) to the link and captures the shown price; PriceWatch then
-  prices that exact combination, from the page or WooCommerce's own lookup
-  (`?wc-ajax=get_variation`) when the shop loads options separately. Grantham's Isabella Ventura
-  Pacific read as £1,645 (cheapest) is now £2,239. Re-drag the bookmarklet to update it.
-- Shops that sell the size as a paid extra on a fixed base price (e.g. Camping Online, WAPF
-  add-ons: £1,479 + "size 15-1000-1025 (+£500)") now report the total for your size, £1,979,
-  instead of the base price.
+  (e.g. size and depth) to the link and captures the shown price; PriceWatch then prices that
+  exact combination, from the page or WooCommerce's own lookup (`?wc-ajax=get_variation`) when
+  the shop loads options separately, instead of the cheapest combination. Re-drag the
+  bookmarklet to update it.
+- Shops that sell the size as a paid extra on a fixed base price (WAPF add-ons such as
+  "size 3-300-325 (+£50)") now report base + extra for your size, instead of the base price.
 - `pricewatch start` starts PriceWatch first, then SearXNG/Docker and Ollama, so prices are
   available at once even when Docker Desktop is slow or crashes (only the shop search needs it).
-- Fix: "Steel Megaframe" matched a shop's plain "Steel" option (an Isabella Commodore read as
-  £3,224 instead of £3,678). The word that sets your frame apart (Mega, EasyGrip, Fibre…) must
-  now be in the shop's option.
+- Fix: a specialist frame option (e.g. "Steel Megaframe") matched a shop's plain "Steel"
+  option. The word that sets your frame apart (Mega, EasyGrip, Fibre…) must now be in the
+  shop's option.
 - Fix: `refresh`/`check-all` crashed on WooCommerce shops that load their options separately
   (`data-product_variations="false"`). Such shops are now reported ("loads its options
   separately") instead of guessed, and one failing shop no longer stops a refresh or a search.
 - New `pricewatch restart` and `pricewatch refresh` (restart, re-check every price, Fair Price,
   search other shops; `refresh ID` for one product; `--no-search`, `--no-fair`, `--no-restart`).
   `check-all` takes an optional product id.
-- **Your size and frame at every shop.** For products with options (e.g. awnings: size, frame,
-  colour), the agent and re-checks now select the option you watch, e.g. "15 (1000-1025) /
-  Steel 28 mm", on Shopify and WooCommerce shops, adding paid frame extras such as
-  "28mm Frame (15-19) (+£130)". Shops without your option are skipped and listed. Before this,
+- **Your size and frame at every shop.** For products with options (size, frame, colour), the
+  agent and re-checks now select the option you watch, e.g. "3 (300-325) / Steel 28 mm", on
+  Shopify and WooCommerce shops, adding paid frame extras such as "28mm Frame (3-7) (+£30)". Shops without your option are skipped and listed. Before this,
   other shops' default option (often the smallest size) was compared, so they looked cheaper.
-- The same for shops that list one schema.org offer per size (e.g. Attwoolls, Magento: a
-  Dometic Stuga Rest read as £1,799 for size 9 is now £2,149 for size 16).
+- The same for shops that list one schema.org offer per size (e.g. Magento AggregateOffer),
+  instead of reading the smallest size's price.
 - **Fair Price on Shopify shops** now checks the size/option your link selects. It compared
-  the shop's lowest price (e.g. £2,430 for a smaller, canvas-only awning) with yours (£3,678);
+  the shop's lowest price (a smaller, cheaper variant) with yours;
   earlier checks of such links are ignored once a correct one exists.
 - The bookmarklet captures the price of the size/option you've selected on Shopify shops (it
   sent the shop's lowest price, so Fair Price wrongly said you were shown less). Re-drag it.
@@ -47,7 +44,7 @@
 - The **+ PriceWatch** bookmarklet opens PriceWatch in a new tab, so the shop's page stays open
   (falls back to the same tab if the browser blocks it). Re-drag it from Share setup to update.
 - **Shopify shops: the right size or option.** Shopify puts the product's lowest variant price
-  in its page data, so a link to a bigger size read too low (a £1,979 awning showed £1,389).
+  in its page data, so a link to a bigger size read too low.
   PriceWatch now reads the linked variant's own price from the shop's `/products/<name>.js`
   data (or the shop's default option when the link has no `?variant=`). The prices are read from
   the page itself where Shopify embeds them, so no extra request is needed (shops rate-limit).
@@ -69,8 +66,8 @@
   product you already watch. Typed prices count in history, comparisons and alerts, are never
   fetched automatically, and are updated with an **Update** box. Alternatives whose checks fail
   link to the same form.
-- **Fix: wrong prices from add-ons.** An Amazon phone was recorded at £115.99 (the
-  "1-year Accidental Damage insurance" offer) instead of £1,139.99. Extraction now skips
+- **Fix: wrong prices from add-ons.** A marketplace page could be recorded at its
+  "1-year Accidental Damage insurance" offer instead of the product's price. Extraction now skips
   insurance, protection plans, warranties, AppleCare, trade-in, delivery and monthly
   ("/mo", "for 10 months") amounts, and prefers the shop's main price box (Amazon
   `priceToPay`/`corePrice`, "current price", "sale price" and similar).

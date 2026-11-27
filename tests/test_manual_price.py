@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 Stevieag and PriceWatch contributors
-"""Shops like Currys block automatic checks (HTTP 403 even for the browser fallback).
+"""Some shops block automatic checks (HTTP 403 even for the browser fallback).
 You can still watch them by typing the price you see."""
 import re
 import tempfile
@@ -37,7 +37,7 @@ class ManualPrice(unittest.TestCase):
         cls.shop = ThreadingHTTPServer(("127.0.0.1", 0), Blocked)
         threading.Thread(target=cls.shop.serve_forever, daemon=True).start()
         cls.shop_url = (f"http://127.0.0.1:{cls.shop.server_address[1]}"
-                        "/products/google-pixel-11-pro-xl-1-tb-obsidian-10307505.html")
+                        "/products/samsung-galaxy-s26-ultra-1-tb-titanium-10307505.html")
         cls.tmp = tempfile.TemporaryDirectory()
         cls.s = load_settings({"PW_DATA_DIR": cls.tmp.name, "PW_ALLOW_PRIVATE_HOSTS": "true",
                                "PW_BROWSER_FETCH": "never", "PW_PORT": "0"})
@@ -61,23 +61,23 @@ class ManualPrice(unittest.TestCase):
             return r.read().decode()
 
     def test_title_from_url(self):
-        self.assertEqual(_title_from_url(self.shop_url), "Google Pixel 11 Pro Xl 1 Tb Obsidian")
+        self.assertEqual(_title_from_url(self.shop_url), "Samsung Galaxy S26 Ultra 1 Tb Titanium")
 
     def test_blocked_link_offers_typing_then_compares(self):
-        phone = self.db.add_item(url="https://shop.example/pixel", title="Pixel 11 Pro XL",
-                                 price="1139.99", currency="GBP", interval_minutes=1440)
+        phone = self.db.add_item(url="https://shop.example/galaxy", title="Galaxy S26 Ultra",
+                                 price="999.99", currency="GBP", interval_minutes=1440)
         page = self.get("/add?text=" + quote(self.shop_url))
         self.assertIn("Couldn&#x27;t read that page", page)
         self.assertIn("Type the price yourself", page)
 
-        page = self.post("/items/manual", url=self.shop_url, title="Pixel at the blocked shop",
-                         price="1,099.00", currency="GBP", parent=str(phone))
-        self.assertIn("Saved £1,099.00", page)
+        page = self.post("/items/manual", url=self.shop_url, title="Phone at the blocked shop",
+                         price="249.00", currency="GBP", parent=str(phone))
+        self.assertIn("Saved £249.00", page)
         alt = self.db.alternatives(phone)[0]
-        self.assertEqual((alt["current_price"], alt["manual"], alt["review"]), ("1099.00", 1, "confirmed"))
+        self.assertEqual((alt["current_price"], alt["manual"], alt["review"]), ("249.00", 1, "confirmed"))
         self.assertIn("price typed by you", page)
         self.assertIn(">Update<", page)
-        self.assertIn("£1,099.00", self.get("/"))           # counts as best elsewhere
+        self.assertIn("£249.00", self.get("/"))           # counts as best elsewhere
 
         # never fetched automatically
         hits = Blocked.hits
@@ -92,9 +92,9 @@ class ManualPrice(unittest.TestCase):
 
     def test_own_product_and_bad_input(self):
         url = self.shop_url + "?own=1"
-        page = self.post("/items/manual", url=url, title="Pixel", price="abc", currency="GBP")
+        page = self.post("/items/manual", url=url, title="Phone", price="abc", currency="GBP")
         self.assertIn("Enter the price as a number", page)
-        page = self.post("/items/manual", url=url, title="Pixel", price="1149", currency="GBP", parent="")
+        page = self.post("/items/manual", url=url, title="Phone", price="1149", currency="GBP", parent="")
         iid = int(re.search(r'action="/items/(\d+)/set-price"', page).group(1))
         self.assertIn("not checked automatically", page)
         self.assertNotIn(">Check now<", page)

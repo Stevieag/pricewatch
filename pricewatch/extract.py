@@ -306,7 +306,7 @@ def _first_amount(text: str):
         if re.search(r"\b(used|pre-owned|refurbished|renewed|other sellers?|new & used)\b[^£$€]{0,20}$", before):
             continue  # "Used from £41.29", "Other sellers on Amazon £41.29"
         if _ADDON_BEFORE.search(text[max(0, m.start() - 80):m.start()]):
-            continue  # "1-year Accidental Damage insurance £115.99", "Protection plan £49"
+            continue  # "1-year Accidental Damage insurance £99.99", "Protection plan £49"
         p = parse_price(m.group(2).replace(" ", ""))
         if p is not None and p > 0:
             ctx = " ".join(text[max(0, m.start() - 45):m.end() + 35].split())

@@ -123,7 +123,11 @@ def _same_frame(want: set[str], got: set[str]) -> bool:
     wn, gn = {w for w in want if w.isdigit()}, {w for w in got if w.isdigit()}
     if (wn or gn) and wn != gn:
         return False
-    return not ({w for w in got if not w.isdigit()} - want)
+    if {w for w in got if not w.isdigit()} - want:      # a material/type you didn't choose
+        return False
+    # the word that makes your frame different (Mega, EasyGrip, Fibre…) must be there;
+    # plain "steel" may be left unsaid ("28mm Frame")
+    return {w for w in want if not w.isdigit()} - {"steel"} <= got
 
 
 def _woo_variations(html: str) -> list[dict]:
@@ -135,7 +139,14 @@ def _woo_variations(html: str) -> list[dict]:
         data = json.loads(_h.unescape(m.group(1)))
     except ValueError:
         return []
+    if not isinstance(data, list):   # "false": the shop loads its options separately (many options)
+        return []
     return [v for v in data if isinstance(v, dict) and isinstance(v.get("attributes"), dict)]
+
+
+def _woo_options_elsewhere(html: str) -> bool:
+    """A WooCommerce product with options that aren't in the page (data-product_variations="false")."""
+    return bool(re.search(r'data-product_variations="false"', html))
 
 
 _ADDON = re.compile(r"([^\n()<>]{2,40})\((\d{1,2})\s*-\s*(\d{1,2})\)([^\n()<>]{0,30})\(\+\s*£\s*([\d,]+(?:\.\d{1,2})?)\)")
@@ -265,6 +276,10 @@ def _options(settings: Settings, url: str, html: str, ex: Extracted, hint: str |
         u = o["url"] if isinstance(o["url"], str) and o["url"].startswith(("http://", "https://")) else url
         cand = (score, price.quantize(Decimal("0.01")), label.strip()[:80], u, o["in_stock"], "jsonld")
         best = cand if best is None or cand[0] > best[0] else best
+    if best is None and _woo_options_elsewhere(html):
+        return Extracted(title=ex.title, price=None, currency=ex.currency, method="none",
+                         context=f"no '{hint}' option on this page (this shop loads its options "
+                                 "separately, so PriceWatch can't pick yours; type the price in instead)"), url
     has_options = bool(offers) or bool(_woo_variations(html)) or bool(m and _SHOPIFY_MARK.search(html[:400_000]))
     if best is None:
         if has_options:   # options exist, none is yours: don't report the default option's price

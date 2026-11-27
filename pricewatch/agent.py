@@ -430,6 +430,10 @@ class PriceAgent:
             except FetchError as e:
                 notes.append(f"{domain_of(url)}: {e}")
                 continue
+            except Exception as e:   # an unusual page must not stop the search
+                log.exception("reading %s failed", domain_of(url))
+                notes.append(f"{domain_of(url)}: couldn't read this page ({type(e).__name__})")
+                continue
             if ex.listing:
                 notes.append(f"{domain_of(url)}: skipped - a list of products, not one product page")
                 continue

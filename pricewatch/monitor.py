@@ -123,7 +123,11 @@ def _same_frame(want: set[str], got: set[str]) -> bool:
     wn, gn = {w for w in want if w.isdigit()}, {w for w in got if w.isdigit()}
     if (wn or gn) and wn != gn:
         return False
-    return not ({w for w in got if not w.isdigit()} - want)
+    if {w for w in got if not w.isdigit()} - want:      # a material/type you didn't choose
+        return False
+    # the word that makes your frame different (Mega, EasyGrip, Fibre…) must be there;
+    # plain "steel" may be left unsaid ("28mm Frame")
+    return {w for w in want if not w.isdigit()} - {"steel"} <= got
 
 
 def _woo_variations(html: str) -> list[dict]:

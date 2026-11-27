@@ -106,6 +106,14 @@ class YourOptionEverywhere(unittest.TestCase):
         self.assertIsNone(ex.price)
         self.assertIn("loads its options separately", ex.context)
 
+    def test_megaframe_is_not_plain_steel(self):   # picked "Steel" £3,224 for "Steel Megaframe" £3,678
+        from pricewatch.monitor import _option_score
+        mega = "1015 (1001-1025cm) / Steel Megaframe"
+        self.assertIsNone(_option_score(mega, "1015 (1001-1025cm) / Steel"))
+        self.assertEqual(_option_score(mega, "1015 (1001-1025cm) / Steel Megaframe"), 2)
+        self.assertIsNone(_option_score(HINT, "15 (1000-1025) / Steel EasyGrip"))
+        self.assertEqual(_option_score(HINT, "Size 15 / 28mm Frame"), 2)
+
     def test_shop_without_your_option_reports_no_price(self):
         ex, _ = fetch_price(self.s, self.base + "/products/small", HINT)
         self.assertIsNone(ex.price)

@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Fix: "Steel Megaframe" matched a shop's plain "Steel" option (an Isabella Commodore read as
+  £3,224 instead of £3,678). The word that sets your frame apart (Mega, EasyGrip, Fibre…) must
+  now be in the shop's option.
 - Fix: `refresh`/`check-all` crashed on WooCommerce shops that load their options separately
   (`data-product_variations="false"`). Such shops are now reported ("loads its options
   separately") instead of guessed, and one failing shop no longer stops a refresh or a search.
